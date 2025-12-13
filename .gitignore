@@ -1,0 +1,31 @@
+# Data files (large)
+data/*.txt
+data/*.gz
+*.txt.gz
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+*.so
+.env
+venv/
+ENV/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Outputs (optional - uncomment if you want to track them)
+# outputs/

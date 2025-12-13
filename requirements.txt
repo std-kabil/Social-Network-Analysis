@@ -1,0 +1,11 @@
+networkx>=3.0
+pandas>=2.0
+matplotlib>=3.7
+seaborn>=0.12
+plotly>=5.15
+python-louvain>=0.16
+scikit-learn>=1.3
+requests>=2.31
+jupyter>=1.0
+psutil>=5.9
+streamlit>=1.28
