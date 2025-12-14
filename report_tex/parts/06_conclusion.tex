@@ -1,0 +1,190 @@
+\section{Limitations}
+
+Before concluding, we explicitly acknowledge the limitations of this work to provide appropriate context for interpreting results.
+
+\subsection{Sampling Limitations}
+
+\subsubsection{BFS Sampling Bias}
+Our use of BFS-based sampling for community detection and centrality analysis introduces systematic bias:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Local over-representation}: BFS explores outward from a seed, over-sampling the seed's neighborhood.
+\item \textbf{Density bias}: High-density regions are more likely to be fully captured than sparse peripheral areas.
+\item \textbf{Community boundary effects}: Communities near the seed are fully captured; distant communities may be partially sampled or missed entirely.
+\end{itemize}
+
+\textbf{Mitigation strategies} (not implemented but recommended for future work):
+\begin{itemize}[leftmargin=*]
+\item Use multiple random seeds and aggregate results
+\item Compare BFS sampling to uniform random sampling or random-walk sampling
+\item Report confidence intervals based on multiple sampling runs
+\end{itemize}
+
+\subsubsection{Shortest Path Sampling}
+While 10,000 samples provide reasonable statistical power, this represents only:
+\begin{equation}
+\frac{10{,}000}{\binom{1{,}198{,}274}{2}} \approx 1.4 \times 10^{-8}
+\end{equation}
+of all possible node pairs. Rare long paths (near the diameter) may be undersampled.
+
+\subsection{Methodological Limitations}
+
+\subsubsection{Static Analysis}
+The Pokec dataset represents a snapshot from May 2012. We cannot:
+\begin{itemize}[leftmargin=*]
+\item Track network evolution over time
+\item Perform temporal link prediction (predicting future edges)
+\item Analyze how communities form and dissolve
+\end{itemize}
+
+\subsubsection{Topology-Only Focus}
+By excluding user profile attributes, we miss opportunities to:
+\begin{itemize}[leftmargin=*]
+\item Correlate communities with demographic factors (age, region, interests)
+\item Perform attribute-based link prediction
+\item Study homophily (tendency to connect with similar users)
+\end{itemize}
+
+This was a deliberate scope decision for computational feasibility, but limits interpretive depth.
+
+\subsubsection{Mutual Friendships Only}
+Our primary analysis uses only reciprocated edges. This:
+\begin{itemize}[leftmargin=*]
+\item Excludes 45.7\% of directed relationships
+\item May underestimate connectivity for users with many one-way followers
+\item Creates more isolated components than the full graph
+\end{itemize}
+
+The ``all connections'' mode addresses this but was not fully analyzed in this report.
+
+\subsection{Technical Limitations}
+
+\subsubsection{NetworkX Performance}
+NetworkX prioritizes readability over performance. For graphs of this size:
+\begin{itemize}[leftmargin=*]
+\item Memory usage is higher than optimized libraries (igraph, graph-tool)
+\item Some algorithms are slower by 10--100$\times$
+\item Full-graph betweenness centrality is infeasible
+\end{itemize}
+
+\subsubsection{Link Prediction Evaluation}
+Our ML evaluation has several caveats:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Small subgraph}: 1,000 nodes may not represent the full network
+\item \textbf{Static evaluation}: We predict existing edges, not future ones
+\item \textbf{Easy negatives}: Uniformly sampled non-edges may be ``easy'' to distinguish from edges
+\item \textbf{No hyperparameter tuning}: We used default logistic regression settings
+\end{itemize}
+
+\subsection{Generalizability Concerns}
+
+Results from the Pokec network may not generalize to:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Global networks}: Pokec is regional (Slovakia); global networks like Facebook show shorter paths
+\item \textbf{Different platforms}: Twitter's follower model differs fundamentally from friendship networks
+\item \textbf{Professional networks}: LinkedIn's connections have different semantics than social friendships
+\item \textbf{Temporal dynamics}: 2012 network structure may differ from current social networks
+\end{itemize}
+
+\section{Conclusion}
+
+\subsection{Summary of Contributions}
+
+This project presents a comprehensive topology-focused analysis of the Pokec social network, demonstrating that meaningful large-scale graph analysis is achievable on consumer hardware through careful engineering and strategic sampling. Our key contributions include:
+
+\begin{enumerate}[leftmargin=*]
+\item \textbf{Empirical validation of six degrees}: We confirm that the Pokec mutual-friendship network exhibits small-world properties with an average path length of 5.67, directly supporting the ``six degrees of separation'' hypothesis.
+
+\item \textbf{Memory-efficient pipeline}: We developed techniques for processing 30M+ edges on 16GB RAM, including streaming mutual-edge extraction and sampling-based algorithms.
+
+\item \textbf{Interactive analysis tool}: The Streamlit dashboard enables reproducible analysis with configurable parameters, real-time visualization, and comprehensive output export.
+
+\item \textbf{Multi-faceted network characterization}: Beyond path lengths, we analyze reciprocity, component structure, community organization, centrality distributions, and link predictability.
+
+\item \textbf{ML integration}: We demonstrate that simple graph-based features achieve strong link prediction performance (AUC 0.94), highlighting the predictive power of local topology.
+\end{enumerate}
+
+\subsection{Key Findings}
+
+\begin{table}[h]
+\centering
+\caption{Summary of Key Quantitative Findings}
+\label{tab:summary}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Finding} & \textbf{Value/Interpretation} \\
+\midrule
+Average path length & 5.67 (supports six degrees) \\
+Reciprocity & 54.3\% (high mutual acknowledgment) \\
+LCC coverage & 73.4\% (giant component dominance) \\
+Clustering coefficient & 0.105 (10,000$\times$ random graph) \\
+Modularity & 0.79 (very strong communities) \\
+Max degree & 7,266 (extreme hub presence) \\
+Link prediction AUC & 0.94 (strong topological signal) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Theoretical Implications}
+
+Our findings align with and extend established network science theory:
+
+\begin{enumerate}[leftmargin=*]
+\item \textbf{Small-world confirmation}: The observed path length closely matches the theoretical prediction $\langle d \rangle \sim \ln N / \ln \langle k \rangle$, validating the Watts-Strogatz model for real social networks.
+
+\item \textbf{Reciprocity matters}: The 54.3\% reciprocity rate justifies analyzing mutual friendships as a distinct, meaningful graph mode that better represents ``real'' social connections.
+
+\item \textbf{Community structure is robust}: High modularity (0.79) persists even in sampled subgraphs, suggesting that community organization is a fundamental property of the network.
+
+\item \textbf{Hubs are critical}: The extreme degree inequality (max 7,266 vs. median 7) confirms scale-free properties and highlights the importance of hub nodes for connectivity.
+\end{enumerate}
+
+\subsection{Practical Implications}
+
+For practitioners working with large social network data:
+
+\begin{enumerate}[leftmargin=*]
+\item \textbf{Sampling is viable}: Carefully designed sampling strategies can provide accurate estimates of global properties without processing the entire graph.
+
+\item \textbf{Memory management is crucial}: Avoiding intermediate data structures (like full edge sets) is essential for processing large graphs on limited hardware.
+
+\item \textbf{Simple ML works}: Classical graph features (Common Neighbors, Jaccard, Adamic-Adar) provide strong baselines for link prediction without requiring complex deep learning.
+
+\item \textbf{Interactive tools aid understanding}: Dashboards that combine computation with visualization help users develop intuition about network structure.
+\end{enumerate}
+
+\subsection{Future Work}
+
+Several directions could extend this work:
+
+\subsubsection{Immediate Extensions}
+\begin{enumerate}[leftmargin=*]
+\item Complete the mutual vs. all-connections comparison
+\item Implement multiple-seed sampling to reduce BFS bias
+\item Add confidence intervals for sampled metrics
+\end{enumerate}
+
+\subsubsection{Methodological Improvements}
+\begin{enumerate}[leftmargin=*]
+\item Migrate to faster graph libraries (igraph, graph-tool) for full-graph algorithms
+\item Implement temporal link prediction if timestamped data becomes available
+\item Explore graph neural networks for link prediction
+\end{enumerate}
+
+\subsubsection{Analytical Extensions}
+\begin{enumerate}[leftmargin=*]
+\item Incorporate profile attributes for community interpretation
+\item Study network resilience (effect of removing hub nodes)
+\item Compare with other regional social networks
+\end{enumerate}
+
+\subsection{Reproducibility Statement}
+
+All code, data processing scripts, and analysis artifacts are available in the project repository. The Streamlit application can reproduce all reported results using the documented configuration parameters. Random seeds are fixed for deterministic sampling.
+
+\subsection{Final Remarks}
+
+This project demonstrates that the ``six degrees of separation'' phenomenon is not merely a sociological curiosity but a measurable, robust property of real social networks. The Pokec dataset, with its 1.6 million users and 30 million relationships, provides compelling evidence that even in regional networks, any two individuals can typically be connected through five to six intermediate acquaintances.
+
+More broadly, this work illustrates that large-scale network analysis is as much about engineering as it is about algorithms. The most sophisticated algorithm is useless if it cannot run on available hardware. By combining theoretical understanding with practical engineering, we can extract meaningful insights from datasets that would otherwise be intractable.
+
+The tools and techniques developed here---sampling strategies, memory-efficient data structures, interactive visualization---are applicable to many other large-scale graph analysis problems, from biological networks to infrastructure systems to knowledge graphs. We hope this work serves as both a case study in social network analysis and a template for tackling similar challenges in other domains.

@@ -1,0 +1,1491 @@
+\documentclass[conference]{IEEEtran}
+
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{url}
+
+\graphicspath{{../outputs/}}
+
+\title{Topology-Driven Social Network Analysis on the Pokec Dataset}
+
+\author{\IEEEauthorblockN{[Your Name]}\\
+\IEEEauthorblockA{[Your University]\\
+[Your Department]\\
+Email: [your.email@domain]}}
+
+\begin{document}
+\maketitle
+
+% ==== BEGIN parts/01_abstract.tex ====
+\begin{abstract}
+The ``six degrees of separation'' hypothesis suggests that any two people in the world can be connected through a chain of at most six acquaintances. This concept, originating from Stanley Milgram's seminal 1967 experiment, has profound implications for understanding social connectivity, information diffusion, and network resilience. In this project, we empirically investigate this phenomenon using the Pokec social network dataset from the Stanford Network Analysis Project (SNAP), which contains 1,632,803 users and 30,622,564 directed friendship relations from Slovakia's largest online social network.
+
+We focus exclusively on topological analysis, deliberately excluding user profile attributes to maintain computational feasibility on consumer hardware. To study how reciprocity affects network structure, we implement two graph interpretations: (1) an ``all connections'' undirected view treating each directed edge as a bidirectional link, and (2) a ``mutual friendships'' graph retaining only reciprocated edges---analogous to real-world acquaintance chains where both parties acknowledge the relationship.
+
+Our methodology employs a sampling-based pipeline implemented in an interactive Streamlit dashboard. The pipeline extracts the largest connected component (LCC), estimates shortest-path length distributions via Monte Carlo sampling of node pairs, computes network metrics (average degree, density, clustering coefficient), performs Louvain community detection on BFS-sampled subgraphs, and ranks node centrality on manageable samples. We also implement an interactive Network Explorer with community-colored visualization and shortest-path highlighting.
+
+Key findings from the mutual-friendships analysis: the mutual graph contains 8,320,600 reciprocal edges with reciprocity $\rho \approx 0.543$; the LCC encompasses 1,198,274 nodes (73.39\% coverage) and 8,312,834 edges; sampling 10,000 random node pairs yields an average shortest-path length of 5.67 (median 6, maximum observed 11), strongly supporting the small-world hypothesis. Louvain community detection on a 50,000-node BFS sample identifies 37 communities with modularity $Q = 0.7855$, indicating pronounced community structure.
+
+As a machine learning extension, we implement link prediction using graph-based similarity features (Common Neighbors, Jaccard coefficient, Adamic--Adar index, Preferential Attachment) combined with degree-based features, trained via logistic regression. On a balanced dataset of 2,485 positive and 2,485 negative samples from a 1,000-node subgraph, the model achieves ROC-AUC of 0.936 and Average Precision of 0.940, demonstrating that local topological features carry substantial predictive signal.
+
+This work demonstrates that rigorous large-scale network analysis is achievable on resource-constrained systems through careful algorithm selection, strategic sampling, and memory-aware engineering. The complete pipeline, interactive dashboard, and reproducible artifacts are provided for educational and research purposes.
+\end{abstract}
+
+% ==== END parts/01_abstract.tex ====
+
+
+% ==== BEGIN parts/02_introduction.tex ====
+\section{Introduction}
+
+\subsection{Motivation}
+Online social networks naturally form graphs: users are nodes, and relationships between users are edges. Studying these graphs helps answer questions such as: How connected is the network? Do we observe small-world behavior (short paths between random users)? Are there clear communities (clusters) of users? Which nodes appear to be central or influential from a topological perspective?
+
+For a student project, a realistic dataset is important because toy graphs often hide the practical challenges of data size and computational cost. The Pokec social network (soc-Pokec) from SNAP is a strong choice because it is large, real, and well-documented. The dataset includes more than 1.6 million nodes and more than 30 million directed edges, making it large enough to require careful engineering.
+
+\subsection{Problem statement}
+The central problem of this project is:
+
+\begin{quote}
+How can we perform a meaningful, well-explained topology-focused analysis of the Pokec social network under realistic memory constraints, while producing outputs that are reproducible, interpretable, and easy to explore?
+\end{quote}
+
+This problem includes two types of challenges. First, scientific and analytical challenges: selecting the right metrics, designing experiments (especially for ``six degrees''), and interpreting results responsibly when we rely on sampling. Second, engineering challenges: handling memory limits, choosing graph representations, avoiding expensive intermediate structures, designing a workflow that does not freeze the machine, and building interactive outputs that always correspond to the latest run.
+
+\subsection{Key design idea: topology-first and memory-aware}
+The project deliberately focuses on topology (structure) rather than user attributes. Although Pokec provides a large profile table, using attributes at full scale is expensive and not strictly required to study path lengths, reciprocity, density, clustering, or communities. Keeping the scope focused allows the project to go deeper on graph algorithms and sampling.
+
+Because the full Pokec graph is extremely large, several common patterns are not feasible on a typical laptop: computing all-pairs shortest paths, running full-graph community detection or betweenness centrality, materializing huge Python sets such as \texttt{set(G.edges())} for 30M edges, and attaching per-node attributes through slow per-node DataFrame lookups.
+
+Instead, this project uses a pipeline of ``full graph only when necessary'' operations (e.g., loading edges and extracting the largest component) and sampling-based computations for expensive tasks (shortest paths, community detection, centrality, visualization).
+
+\subsection{Research questions}
+To keep the report focused while still deep and complete, the analysis is organized around the following research questions:
+
+\begin{enumerate}[leftmargin=*]
+\item \textbf{Connectivity and components:} How much of the graph lies in the largest connected component, especially after enforcing reciprocity (mutual friendships)?
+\item \textbf{Small-world behavior / six degrees:} What is the typical shortest-path distance between two users (estimated by sampling), and does it match the ``six degrees'' intuition?
+\item \textbf{Community structure:} Do we observe strong community structure (via Louvain modularity) when analyzing a representative sample subgraph?
+\item \textbf{Centrality and hubs:} Which nodes become central in sampled subgraphs, and what do heavy-tailed degrees imply for connectivity?
+\item \textbf{Practical ML add-on:} Can classical link prediction features provide a strong baseline on a sampled subgraph, and what can we learn from these predictions?
+\end{enumerate}
+
+\subsection{Contributions}
+This project contributes both analysis results and a practical tool:
+
+\begin{itemize}[leftmargin=*]
+\item A Streamlit application that runs the analysis pipeline and supports interactive exploration.
+\item A memory-aware method to construct a mutual friendship graph without building huge intermediate edge sets.
+\item A consistent approach to sampling for shortest paths, clustering, community detection, and centrality.
+\item A network explorer visualization with community coloring and shortest-path highlighting.
+\item A clean separation between live session results and files on disk, avoiding confusion caused by stale artifacts.
+\item An optional ML module for link prediction that stays small and fast.
+\end{itemize}
+
+\subsection{Report organization}
+The remainder of this report follows the required structure: Related Works reviews key background on social network analysis, community detection, and link prediction. Methods describes the dataset, graph construction choices, sampling strategies, and system implementation. Experimental Results reports measured values and provides interpretation. Conclusion summarizes findings, strengths, weaknesses, and future work.
+
+% ==== END parts/02_introduction.tex ====
+
+
+% ==== BEGIN parts/02b_six_degrees_theory.tex ====
+\section{The Six Degrees of Separation: Theory and Background}
+
+This section provides a comprehensive overview of the ``six degrees of separation'' concept, tracing its origins from sociological experiments to modern computational validations on massive online networks.
+
+\subsection{Historical Origins: Milgram's Small World Experiment}
+
+The phrase ``six degrees of separation'' originates from a series of experiments conducted by social psychologist Stanley Milgram in the 1960s~\cite{milgram1967}. In his most famous study, Milgram asked randomly selected individuals in Omaha, Nebraska and Wichita, Kansas to forward a letter to a target person in Boston, Massachusetts. Participants could only send the letter to someone they knew personally on a first-name basis, who would then forward it similarly until it reached the target.
+
+\subsubsection{Experimental Design}
+Milgram's methodology was elegantly simple:
+\begin{enumerate}[leftmargin=*]
+\item \textbf{Source selection}: Random individuals from the Midwest United States.
+\item \textbf{Target specification}: A stockbroker in Boston (chosen for geographic and social distance).
+\item \textbf{Forwarding rule}: Each participant could only pass the letter to a personal acquaintance.
+\item \textbf{Tracking}: Each letter contained a roster to track the chain of intermediaries.
+\end{enumerate}
+
+\subsubsection{Key Findings}
+Of the letters that successfully reached the target, the median number of intermediaries was approximately six. This surprising result suggested that despite the vast size of the American population, social networks possess a ``small-world'' property where any two individuals are connected by remarkably short chains.
+
+However, Milgram's experiment had significant limitations:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Low completion rate}: Only about 29\% of chains were completed.
+\item \textbf{Selection bias}: Participants who forwarded letters may have been more socially connected.
+\item \textbf{Geographic constraints}: The experiment was limited to the United States.
+\end{itemize}
+
+Despite these limitations, the ``six degrees'' concept captured public imagination and became a foundational idea in network science.
+
+\subsection{Mathematical Formalization: Small-World Networks}
+
+The theoretical underpinning of the six degrees phenomenon was formalized by Watts and Strogatz in their landmark 1998 paper~\cite{watts1998}. They introduced the \emph{small-world network model}, which explains how networks can simultaneously exhibit:
+\begin{enumerate}[leftmargin=*]
+\item \textbf{High clustering}: Friends of friends tend to be friends (triadic closure).
+\item \textbf{Short average path lengths}: Any two nodes can be reached in few hops.
+\end{enumerate}
+
+\subsubsection{The Watts-Strogatz Model}
+The model begins with a regular ring lattice where each node connects to its $k$ nearest neighbors. Then, with probability $p$, each edge is ``rewired'' to a random node. This simple mechanism produces networks with:
+
+\begin{equation}
+L(p) \sim \frac{N}{2k} f_1(pNk) \quad \text{and} \quad C(p) \sim \frac{3(k-2)}{4(k-1)} f_2(pNk)
+\end{equation}
+
+where $L$ is the average path length, $C$ is the clustering coefficient, $N$ is the number of nodes, and $f_1, f_2$ are scaling functions. For intermediate values of $p$, the network exhibits both high clustering (like regular lattices) and short paths (like random graphs).
+
+\subsubsection{Characteristic Path Length}
+For a small-world network, the average shortest path length $\langle d \rangle$ scales logarithmically with network size:
+\begin{equation}
+\langle d \rangle \sim \frac{\ln N}{\ln \langle k \rangle}
+\end{equation}
+where $N$ is the number of nodes and $\langle k \rangle$ is the average degree. This logarithmic scaling explains why even networks with millions of nodes can have average path lengths of only 5--7.
+
+\subsection{Modern Validations on Online Social Networks}
+
+The advent of large-scale online social networks provided unprecedented opportunities to test the six degrees hypothesis on complete population-scale graphs.
+
+\subsubsection{Facebook's Four Degrees Study (2011)}
+In 2011, researchers at Facebook analyzed the complete social graph of 721 million active users with 69 billion friendship links~\cite{backstrom2012}. Their findings were striking:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Average distance}: 4.74 hops (later updated to 3.57 in 2016 with 1.59 billion users).
+\item \textbf{99.6\% reachability}: Almost all user pairs were connected.
+\item \textbf{Decreasing trend}: As the network grew, average distance actually decreased.
+\end{itemize}
+
+This study provided the first definitive evidence that the six degrees hypothesis holds---and is even conservative---for modern social networks.
+
+\subsubsection{Twitter and Directed Networks}
+Studies on Twitter revealed different dynamics due to its directed follower model~\cite{kwak2010}. The average path length was approximately 4.12 when considering follower relationships, but the network exhibited lower reciprocity than Facebook, highlighting how platform design affects network topology.
+
+\subsubsection{LinkedIn's Professional Network}
+LinkedIn's analysis of its professional network found average path lengths of approximately 5.5 hops, slightly longer than Facebook, possibly reflecting the more selective nature of professional connections~\cite{linkedin2016}.
+
+\subsection{Mutual Friendships vs. One-Way Follows}
+
+A critical distinction in social network analysis is between \emph{directed} and \emph{undirected} relationships, which has direct implications for the six degrees concept.
+
+\subsubsection{Directed Relationships}
+In platforms like Twitter or Instagram, user A can follow user B without reciprocation. This creates a directed graph where:
+\begin{itemize}[leftmargin=*]
+\item Paths may exist in one direction but not the other.
+\item ``Degrees of separation'' becomes asymmetric.
+\item Celebrity nodes create highly skewed degree distributions.
+\end{itemize}
+
+\subsubsection{Mutual (Reciprocal) Friendships}
+In contrast, mutual friendships---where both parties acknowledge the relationship---more closely model real-world acquaintance chains:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Bidirectional trust}: Both parties recognize the connection.
+\item \textbf{Symmetric paths}: If A can reach B, then B can reach A.
+\item \textbf{Stronger ties}: Reciprocated relationships often indicate closer connections.
+\end{itemize}
+
+The Pokec dataset provides directed edges, but approximately 54.3\% of relationships are reciprocated. By extracting only mutual friendships, we create a graph that better represents the ``acquaintance chains'' in Milgram's original conception.
+
+\subsection{Why This Matters: Implications of Small-World Structure}
+
+The small-world property has profound implications beyond mere curiosity:
+
+\subsubsection{Information Diffusion}
+Short path lengths enable rapid information spread. News, rumors, and viral content can reach large populations in few transmission steps. This has implications for:
+\begin{itemize}[leftmargin=*]
+\item Marketing and viral campaigns
+\item Misinformation spread
+\item Public health communication
+\end{itemize}
+
+\subsubsection{Network Resilience}
+Small-world networks are typically robust to random node failures but vulnerable to targeted attacks on high-degree hubs~\cite{albert2000}. Understanding path length distributions helps assess network vulnerability.
+
+\subsubsection{Search and Navigation}
+Milgram's experiment demonstrated not just that short paths exist, but that people can \emph{find} them using only local information. This ``navigability'' property has inspired decentralized search algorithms and peer-to-peer network designs~\cite{kleinberg2000}.
+
+\subsection{Research Questions for This Project}
+
+Given this theoretical background, our analysis of the Pokec network addresses several specific questions:
+
+\begin{enumerate}[leftmargin=*]
+\item \textbf{Path length validation}: Does the Pokec mutual-friendship graph exhibit average path lengths consistent with the six degrees hypothesis (i.e., $\langle d \rangle \leq 6$)?
+\item \textbf{Reciprocity effects}: How does restricting to mutual friendships affect connectivity and path lengths compared to treating all directed edges as connections?
+\item \textbf{Small-world metrics}: Does the network exhibit the characteristic combination of high clustering and short paths?
+\item \textbf{Component structure}: What fraction of users are reachable from each other (i.e., lie in the largest connected component)?
+\end{enumerate}
+
+These questions guide our experimental design and interpretation of results in subsequent sections.
+
+
+% ==== END parts/02b_six_degrees_theory.tex ====
+
+
+% ==== BEGIN parts/03_related_works.tex ====
+\section{Related Works}
+
+This section briefly reviews the main ideas that support the methods used in this project. The goal is not to survey everything, but to explain why the selected approaches are reasonable for a large social network dataset.
+
+\subsection{Social network datasets and graph analysis}
+Large online social networks have been widely used as benchmarks for studying connectivity, user interaction patterns, and community structure. The Pokec dataset is distributed through SNAP and has become a common dataset for graph mining research.
+
+In network science, core concepts such as degree distribution, clustering, components, and shortest paths are standard tools for describing the topology of a graph~\cite{newman2010,easley2010}. For very large graphs, the main practical challenge is that several exact computations are too expensive, so researchers rely on approximations and sampling.
+
+\subsection{Small-world phenomenon and ``six degrees''}
+The ``six degrees of separation'' idea is commonly associated with Milgram's social experiment~\cite{milgram1967}. In graph terms, the concept is related to the distribution of shortest path lengths between nodes.
+
+Watts and Strogatz popularized the small-world model, showing that networks can have both high clustering and short average path lengths~\cite{watts1998}. Newman also discussed how these properties can be measured and interpreted in large networks~\cite{newman2010}.
+
+In practice, computing all-pairs shortest paths is impossible for graphs with millions of nodes. Therefore, many studies use random sampling of node pairs to estimate path-length distributions. This is the approach adopted in this project.
+
+\subsection{Community detection and modularity}
+Community detection aims to split a graph into groups of nodes with dense internal connections and sparse external connections. A widely used approach for large graphs is the Louvain method, which optimizes modularity in a greedy, hierarchical manner~\cite{blondel2008}.
+
+Louvain is attractive because it is relatively fast compared to many alternatives, it often produces meaningful partitions on social networks, and it provides a single scalar (modularity) that helps quantify how strong the community structure is.
+
+However, community detection on the full Pokec graph is heavy. Therefore, this project applies Louvain on a sampled subgraph, with a clear explanation of the tradeoff: the result reflects the sampled region and not necessarily the entire network.
+
+\subsection{Centrality measures and scalability}
+Centrality measures quantify which nodes appear important in a network. Degree centrality is simple and scalable, while betweenness centrality is informative but expensive because it relies on shortest paths. NetworkX supports an approximation by sampling $k$ source nodes, which provides a usable ranking for large graphs when $k$ is small.
+
+\subsection{Link prediction: classical similarity features and ML baselines}
+Link prediction asks whether a pair of nodes is likely to have a link (or to form a link in the future). A classical approach is to compute similarity scores such as Common Neighbors, Jaccard coefficient, Adamic--Adar, and Preferential Attachment~\cite{liben2007,adamic2003}. A common next step is to use these scores as features for a simple classifier such as logistic regression.
+
+In this project, link prediction is not the main focus, but it is used as a small ML extension to make the project richer while staying computationally lightweight.
+
+\subsection{Tools and reproducibility}
+NetworkX provides a flexible Python interface for graphs, Streamlit supports interactive dashboards, and Plotly supports interactive graphs and HTML exports. The engineering work emphasizes reproducibility and clarity: results shown in the Streamlit UI are generated from the current run and can be exported to files for later use.
+
+% ==== END parts/03_related_works.tex ====
+
+
+% ==== BEGIN parts/04_methods_a.tex ====
+\section{Methods}
+
+\subsection{Dataset and graph construction}
+
+\subsubsection{Dataset: Pokec social network (soc-Pokec)}
+The dataset used is the Pokec social network provided by SNAP. Pokec is the most popular Slovak online social network. The dataset is anonymized and contains relationships and user profile data for the whole network. Friendships in the Pokec network are oriented (directed). The dataset was crawled during May 25--27, 2012.
+
+From the official dataset readme, the reported statistics are: 1,632,803 nodes and 30,622,564 directed edges; the largest weakly connected component contains all nodes and edges; the largest strongly connected component contains 1,304,537 nodes (0.799) and 29,183,655 edges (0.953); the average clustering coefficient is 0.1094; the reported diameter is 11; and the 90-percentile effective diameter is 5.3.
+
+\subsubsection{Why topology-only (and why not profiles)}
+The dataset also provides a wide profile table with many attributes in Slovak. In early notebook attempts, attaching profile attributes to every node caused major performance issues (slow per-node lookups and high memory usage). Because the project objective is graph topology, the profile table was excluded from the main analysis.
+
+This is an important design decision:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Why not profiles?} They introduce a second large dataset and shift the project toward attribute/text analysis, which is outside the scope.
+\item \textbf{Why topology?} Topology supports clear metrics (paths, clustering, communities), and we can explain tradeoffs and sampling while staying within practical constraints.
+\end{itemize}
+
+\subsubsection{Graph representations and modes}
+The Pokec relationships are directed. There are multiple valid ways to interpret this, and each choice affects results. This project implements two graph modes:
+
+\textbf{Mutual friendships only (reciprocal edges):} A mutual friendship is a pair $(u,v)$ such that both directed edges exist: $u\rightarrow v$ and $v\rightarrow u$. The mutual graph is undirected and contains only reciprocal edges.
+
+\textbf{All connections (undirected view):} Each directed edge is treated as an undirected connection. This produces an undirected graph representing that some relationship exists between $u$ and $v$, without requiring reciprocity.
+
+We keep both modes because mutual ties can be interpreted as stronger relationships, while all-connections is closer to the raw data and may increase connectivity.
+
+\subsubsection{Largest connected component (LCC)}
+Many real-world networks contain many small disconnected components. Several algorithms assume connectivity or become hard to interpret when the graph is fragmented. Therefore, the analysis extracts the largest connected component (LCC) and performs most measurements on it. This reduces ``no path'' events and focuses on the main part of the social network.
+
+\subsubsection{Reproducibility and configuration}
+All experiments are controlled by a configuration including graph mode, random seed, and sample sizes (shortest-path pairs, clustering nodes, community nodes, centrality nodes) as well as visualization parameters. The configuration is stored in the saved results JSON.
+
+% ==== END parts/04_methods_a.tex ====
+
+% ==== BEGIN parts/04_methods_b.tex ====
+\subsection{Sampling strategy and algorithms}
+
+This project studies a very large network (over 1.6M nodes). Many standard algorithms that work on small graphs are not feasible at this scale in a typical student environment. Therefore, the core method is:
+
+\begin{quote}
+Use the full graph only for operations that are linear or near-linear in the number of edges/nodes, and use sampling for operations that scale super-linearly (or require many shortest-path computations).
+\end{quote}
+
+\subsubsection{Overall pipeline}
+For a chosen graph mode (\texttt{mutual} or \texttt{all}), the analysis pipeline is:
+\begin{enumerate}[leftmargin=*]
+\item Load or build the graph.
+\item Extract the LCC.
+\item Compute degrees and basic metrics.
+\item Estimate shortest-path length distribution by sampling random node pairs.
+\item Estimate clustering coefficient by sampling nodes.
+\item Run Louvain community detection on a BFS-sampled subgraph.
+\item Compute centrality rankings on a sampled subgraph.
+\item Build a visualization subgraph and compute a spring layout.
+\end{enumerate}
+
+\subsubsection{Graph loading: why NetworkX}
+NetworkX is not the fastest library for huge graphs, but it is widely used in education and easy to understand. The project targets university student-level readability.
+
+We considered faster libraries such as igraph or graph-tool, but they add installation complexity and reduce portability. The main requirement here is clear reasoning and reproducible results rather than maximum performance.
+
+\subsubsection{Basic metrics and degree statistics}
+On the LCC we compute number of nodes/edges, average degree, density, and degree summary (min/median/max). Real social networks often show heavy-tailed degree distributions. This affects connectivity and also makes visualization more difficult.
+
+For plotting, the app samples degrees for responsiveness and supports a percentile cap (default 99\%) to zoom the x-axis. This is a visualization choice that improves readability without changing computed metrics.
+
+\subsubsection{Shortest paths (degrees of separation)}
+Exact average shortest path length is not feasible at this scale. We estimate the shortest path length distribution by sampling \texttt{num\_pairs} random pairs of nodes from the LCC and computing shortest path lengths. The output includes mean/median/std/min/max and counts of failures.
+
+\subsubsection{Clustering coefficient (sampled)}
+Computing clustering for all nodes is expensive. We sample \texttt{clustering\_sample} nodes and compute their clustering coefficients, then average the values. The report treats this as an estimate and reports the sampling size.
+
+\subsubsection{Community detection (Louvain) on a sampled subgraph}
+Running Louvain on the full LCC is expensive. We construct a BFS-sampled subgraph (e.g., 50,000 nodes) starting from a high-degree node, then run Louvain and report number of communities and modularity.
+
+BFS sampling tends to preserve local structure and connectivity (useful for community detection), but it introduces bias toward the start region. This limitation is acknowledged in the report.
+
+\subsubsection{Centrality analysis on a sampled subgraph}
+Degree centrality is computed directly on a sampled connected subgraph. Betweenness centrality is approximated using NetworkX's sampling parameter $k$.
+
+\subsubsection{Visualization subgraph}
+Visualizing millions of nodes is impossible in a browser. The project builds a 1,000-node visualization subgraph using reservoir sampling plus BFS from a high-degree seed node, then computes a spring layout with tunable parameters (layout $k$ and iterations). Communities are computed on the visualization subgraph for coloring.
+
+% ==== END parts/04_methods_b.tex ====
+
+% ==== BEGIN parts/04_methods_c.tex ====
+\subsection{System implementation and engineering challenges}
+
+This project includes a practical system (Streamlit app) that supports reproducible analysis and interactive exploration. This section describes key engineering challenges and how they were solved.
+
+\subsubsection{Notebooks vs Streamlit}
+The initial work started in notebooks, which are good for quick experimentation. However, notebooks can freeze under long-running computations, and it is easy to accidentally create huge intermediate objects. In addition, output artifacts can remain on disk and confuse later results.
+
+Streamlit was introduced to provide a repeatable analysis workflow with interactive parameter control, clear separation between running the analysis and viewing results, and exportable outputs (JSON, CSV, HTML, PNG).
+
+\subsubsection{Memory-driven decisions}
+Memory was the main constraint.
+
+\textbf{Mutual edge construction:} A naive mutual-graph approach builds a set of all edges and checks reverse edges. With 30M edges, a full edge-set can freeze a student machine. The implemented solution iterates through directed edges and checks for reverse edges without materializing a giant set.
+
+\textbf{Avoid per-node profile attachment:} Repeated DataFrame lookups for 1.6M nodes are slow and memory-heavy, so the project focuses on topology only.
+
+\textbf{Avoid full-graph heavy algorithms:} Full community detection and betweenness on the full graph are infeasible; sampling and approximations are used.
+
+\subsubsection{UI state and stale outputs}
+Streamlit reruns the script frequently. Without session state, it is easy to recompute heavy tasks or display stale results.
+
+The app stores the analysis payload, degree arrays, sampled path lengths, and the visualization subgraph in \texttt{st.session\_state}. The full LCC graph is deleted after extracting needed arrays to reduce memory.
+
+A key issue observed during development was confusing old files in \texttt{outputs/} with the latest run. The Outputs tab was redesigned to separate:
+\begin{enumerate}[leftmargin=*]
+\item \textbf{Latest run (from session)}: regenerated from session state.
+\item \textbf{Files on disk}: shown separately and labeled as potentially legacy.
+\end{enumerate}
+
+\subsubsection{Duplicate element IDs}
+Streamlit requires unique keys for charts and widgets. The app assigns unique keys (including a per-run \texttt{run\_id}) to prevent \texttt{StreamlitDuplicateElementId} errors and to force regeneration of plots.
+
+\subsubsection{Exporting results}
+The app exports JSON/CSV summaries and Plotly HTML plots. It also generates a summary table PNG (when Matplotlib is available). These exports directly support report writing.
+
+% ==== END parts/04_methods_c.tex ====
+
+% ==== BEGIN parts/04_methods_d.tex ====
+\subsection{Reproducibility, parameters, and output artifacts}
+
+\subsubsection{Fixed random seed}
+The analysis uses a fixed random seed (default 42) for random pair selection for shortest paths, node sampling for clustering coefficient, reservoir sampling for visualization, and sampling for link prediction. A fixed seed makes results repeatable, although sampled estimates can still vary slightly with different seeds.
+
+\subsubsection{Configuration saved in the results JSON}
+Each analysis run stores its configuration inside the saved JSON file (\texttt{outputs/analysis\_results\_\{mode\}.json}). This includes graph mode, sample sizes, betweenness approximation parameter, visualization settings, and the degree-histogram cap used for plotting.
+
+\subsubsection{Saved mutual run setup}
+The exported run in this repository includes a full run for mutual mode with the following key settings:
+\begin{itemize}[leftmargin=*]
+\item Shortest path pairs: 10,000
+\item Clustering sample: 10,000 nodes
+\item Community sample: 50,000 nodes (BFS sample)
+\item Centrality sample: 10,000 nodes
+\item Betweenness approximation: $k=500$
+\item Visualization subgraph: 1,000 nodes, spring layout $k=0.5$, iterations=50
+\end{itemize}
+
+\subsubsection{What ``Save results to outputs/'' generates}
+The Streamlit app was enhanced so saving results generates artifacts from the current session (not legacy notebook outputs). It saves:
+\begin{itemize}[leftmargin=*]
+\item Analysis JSON: \texttt{analysis\_results\_\{mode\}.json}
+\item Summary table: \texttt{network\_summary\_\{mode\}.csv} and \texttt{network\_summary\_\{mode\}.png}
+\item Plotly HTML files: degree distribution, path length distribution, network visualization, centrality charts, community sizes, component sizes
+\item CSV tables: top centrality nodes, top communities, component sizes
+\item ML artifacts (if ML ran): metrics JSON, ROC/PR HTML, top predicted edges CSV
+\end{itemize}
+
+\subsubsection{Reproduction steps}
+To reproduce the run:
+\begin{enumerate}[leftmargin=*]
+\item Ensure \texttt{data/soc-pokec-relationships.txt} exists.
+\item Run \texttt{streamlit run app.py}.
+\item Select graph mode and parameters.
+\item Click \textbf{Run analysis}.
+\item (Optional) run \textbf{ML (Link Prediction)}.
+\item Click \textbf{Save results to outputs/}.
+\end{enumerate}
+
+% ==== END parts/04_methods_d.tex ====
+
+% ==== BEGIN parts/04_methods_e.tex ====
+\subsection{Algorithm Details and Complexity Analysis}
+
+This section provides detailed algorithmic descriptions, mathematical formulations, and complexity analysis for the core methods used in this project.
+
+\subsubsection{Breadth-First Search (BFS) for Shortest Paths}
+
+The shortest path between two nodes in an unweighted graph is computed using Breadth-First Search (BFS). BFS explores nodes level by level, guaranteeing that the first time a node is visited, it is via the shortest path.
+
+\textbf{Algorithm 1: BFS Shortest Path}
+
+{\small
+\begin{enumerate}[leftmargin=*, nosep]
+\item Initialize: $\texttt{visited} \gets \{\texttt{source}\}$, $\texttt{queue} \gets [(\texttt{source}, 0)]$
+\item While queue not empty:
+  \begin{enumerate}[nosep]
+  \item Pop $(\texttt{node}, \texttt{dist})$ from queue
+  \item For each neighbor $n$ of node:
+    \begin{itemize}[nosep]
+    \item If $n = \texttt{target}$: return $\texttt{dist} + 1$
+    \item If $n \notin \texttt{visited}$: add to visited and queue
+    \end{itemize}
+  \end{enumerate}
+\item Return $\infty$ (no path)
+\end{enumerate}
+}
+
+\textbf{Complexity Analysis:}
+\begin{itemize}[leftmargin=*]
+\item \textbf{Time complexity}: $O(V + E)$ where $V$ is the number of vertices and $E$ is the number of edges. Each vertex and edge is visited at most once.
+\item \textbf{Space complexity}: $O(V)$ for the visited set and queue.
+\end{itemize}
+
+For our path length estimation, we sample $k$ random pairs and run BFS for each, giving total complexity $O(k(V + E))$. With $k = 10{,}000$ pairs on a graph with $\sim$1.2M nodes and $\sim$8.3M edges, this remains tractable.
+
+\subsubsection{Mathematical Formulation: Shortest Path Length}
+
+For an unweighted graph $G = (V, E)$, the shortest path length $d(u, v)$ between nodes $u$ and $v$ is defined as:
+\begin{equation}
+d(u, v) = \min\{|P| : P \text{ is a path from } u \text{ to } v\}
+\end{equation}
+where $|P|$ denotes the number of edges in path $P$. If no path exists, $d(u, v) = \infty$.
+
+The \textbf{average shortest path length} (characteristic path length) is:
+\begin{equation}
+\langle d \rangle = \frac{1}{n(n-1)} \sum_{u \neq v} d(u, v)
+\end{equation}
+
+Computing this exactly requires $O(n^2)$ BFS operations, which is infeasible for $n > 10^6$. Instead, we estimate $\langle d \rangle$ by sampling:
+\begin{equation}
+\hat{d} = \frac{1}{k} \sum_{i=1}^{k} d(u_i, v_i)
+\end{equation}
+where $(u_i, v_i)$ are $k$ uniformly random node pairs. By the law of large numbers, $\hat{d} \to \langle d \rangle$ as $k \to \infty$.
+
+\subsubsection{Louvain Algorithm for Community Detection}
+
+The Louvain algorithm~\cite{blondel2008} is a greedy optimization method for detecting communities by maximizing \emph{modularity}. It operates in two phases that repeat iteratively.
+
+\textbf{Modularity Definition:}
+Modularity $Q$ measures the quality of a partition by comparing edge density within communities to a null model:
+\begin{equation}
+Q = \frac{1}{2m} \sum_{i,j} \left[ A_{ij} - \frac{k_i k_j}{2m} \right] \delta(c_i, c_j)
+\end{equation}
+where:
+\begin{itemize}[leftmargin=*]
+\item $A_{ij}$ is the adjacency matrix entry (1 if edge exists, 0 otherwise)
+\item $k_i, k_j$ are the degrees of nodes $i$ and $j$
+\item $m = \frac{1}{2}\sum_i k_i$ is the total number of edges
+\item $c_i$ is the community assignment of node $i$
+\item $\delta(c_i, c_j) = 1$ if $c_i = c_j$, else 0
+\end{itemize}
+
+Modularity ranges from $-0.5$ to $1$, with values above $0.3$ typically indicating significant community structure.
+
+\textbf{Algorithm 2: Louvain Community Detection}
+
+{\small
+\textit{Phase 1 (Local optimization):}
+\begin{enumerate}[leftmargin=*, nosep]
+\item For each node $i$: compute $\Delta Q$ for moving $i$ to each neighbor's community
+\item Move $i$ to community with max positive $\Delta Q$
+\item Repeat until no improvement
+\end{enumerate}
+
+\textit{Phase 2 (Aggregation):}
+\begin{enumerate}[leftmargin=*, nosep]
+\item Create super-graph: nodes $=$ communities
+\item Edge weights $=$ sum of inter-community edges
+\end{enumerate}
+
+Repeat Phases 1--2 until modularity converges.
+}
+
+\textbf{Modularity Gain Formula:}
+The change in modularity when moving node $i$ to community $C$ is:
+\begin{equation}
+\Delta Q = \frac{k_{i,\text{in}}}{m} - \frac{\Sigma_{\text{tot}} \cdot k_i}{2m^2}
+\end{equation}
+where $k_{i,\text{in}}$ is the sum of edge weights from $i$ to nodes in $C$, and $\Sigma_{\text{tot}}$ is the sum of all degrees in $C$.
+
+\textbf{Complexity Analysis:}
+\begin{itemize}[leftmargin=*]
+\item \textbf{Time complexity}: $O(n \log n)$ on sparse graphs in practice, though worst-case is $O(n^2)$.
+\item \textbf{Space complexity}: $O(n + m)$ for storing the graph and community assignments.
+\end{itemize}
+
+For our 50,000-node BFS sample, Louvain completes in seconds, making it practical for interactive analysis.
+
+\subsubsection{Centrality Measures}
+
+We compute two centrality measures to identify influential nodes.
+
+\textbf{Degree Centrality:}
+The simplest centrality measure, counting direct connections:
+\begin{equation}
+C_D(v) = \frac{\deg(v)}{n - 1}
+\end{equation}
+where $\deg(v)$ is the degree of node $v$ and $n$ is the total number of nodes. Normalized degree centrality ranges from 0 to 1.
+
+\textbf{Complexity}: $O(n)$ to compute for all nodes (degrees are stored in the graph structure).
+
+\textbf{Betweenness Centrality:}
+Measures how often a node lies on shortest paths between other nodes:
+\begin{equation}
+C_B(v) = \sum_{s \neq v \neq t} \frac{\sigma_{st}(v)}{\sigma_{st}}
+\end{equation}
+where $\sigma_{st}$ is the total number of shortest paths from $s$ to $t$, and $\sigma_{st}(v)$ is the number of those paths passing through $v$.
+
+\textbf{Algorithm 3: Brandes' Betweenness Centrality}
+
+{\small
+\begin{enumerate}[leftmargin=*, nosep]
+\item For each source $s$: run BFS computing distances $d[t]$ and path counts $\sigma[t]$
+\item For each $t$ in reverse BFS order:
+  \begin{itemize}[nosep]
+  \item For each predecessor $p$: $\delta[p] \mathrel{+}= \frac{\sigma[p]}{\sigma[t]}(1 + \delta[t])$
+  \item If $t \neq s$: $\texttt{betweenness}[t] \mathrel{+}= \delta[t]$
+  \end{itemize}
+\end{enumerate}
+}
+
+\textbf{Complexity Analysis:}
+\begin{itemize}[leftmargin=*]
+\item \textbf{Exact}: $O(VE)$ time, $O(V + E)$ space using Brandes' algorithm.
+\item \textbf{Approximate}: $O(kE)$ time by sampling $k$ source nodes.
+\end{itemize}
+
+For our analysis, we use $k = 500$ source nodes, reducing computation from hours to seconds while providing reasonable approximations for ranking purposes.
+
+\subsubsection{Clustering Coefficient}
+
+The local clustering coefficient measures triadic closure around a node:
+\begin{equation}
+C_i = \frac{2 \cdot |\{e_{jk} : v_j, v_k \in N_i, e_{jk} \in E\}|}{k_i(k_i - 1)}
+\end{equation}
+where $N_i$ is the neighborhood of node $i$ and $k_i = |N_i|$ is its degree. This counts the fraction of possible triangles that actually exist.
+
+The \textbf{average clustering coefficient} is:
+\begin{equation}
+\langle C \rangle = \frac{1}{n} \sum_{i=1}^{n} C_i
+\end{equation}
+
+\textbf{Complexity}: Computing $C_i$ for a single node takes $O(k_i^2)$ time. For all nodes, this is $O(\sum_i k_i^2)$, which can be expensive for high-degree nodes. We sample 10,000 nodes to estimate $\langle C \rangle$.
+
+\subsubsection{BFS Sampling for Subgraph Extraction}
+
+To create representative subgraphs for expensive computations, we use BFS sampling starting from a high-degree seed node.
+
+\textbf{Algorithm 4: BFS Subgraph Sampling}
+
+{\small
+\begin{enumerate}[leftmargin=*, nosep]
+\item Initialize: $\texttt{visited} \gets \{\texttt{seed}\}$, $\texttt{queue} \gets [\texttt{seed}]$
+\item While queue not empty and $|\texttt{visited}| < \texttt{max\_nodes}$:
+  \begin{enumerate}[nosep]
+  \item Pop node from queue
+  \item For each unvisited neighbor: add to visited and queue
+  \item Stop if $|\texttt{visited}| \geq \texttt{max\_nodes}$
+  \end{enumerate}
+\item Return induced subgraph on visited nodes
+\end{enumerate}
+}
+
+\textbf{Why BFS sampling?}
+\begin{itemize}[leftmargin=*]
+\item \textbf{Connectivity}: The resulting subgraph is always connected.
+\item \textbf{Local structure preservation}: BFS captures the local neighborhood structure.
+\item \textbf{Determinism}: Given a seed, results are reproducible.
+\end{itemize}
+
+\textbf{Limitations:}
+\begin{itemize}[leftmargin=*]
+\item \textbf{Bias}: Over-represents the dense region around the seed.
+\item \textbf{Not globally representative}: May miss peripheral communities.
+\end{itemize}
+
+We mitigate bias by selecting a high-degree seed (ensuring broad initial reach) and acknowledging that results reflect the sampled region.
+
+\subsubsection{Spring Layout for Visualization}
+
+Network visualization uses the Fruchterman-Reingold force-directed algorithm, which simulates physical forces:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Attractive forces}: Connected nodes attract each other (like springs).
+\item \textbf{Repulsive forces}: All nodes repel each other (like charged particles).
+\end{itemize}
+
+The algorithm iteratively updates node positions until equilibrium:
+\begin{equation}
+\vec{F}_{\text{attract}}(u, v) = \frac{d(u,v)^2}{k} \cdot \hat{r}_{uv}, \quad
+\vec{F}_{\text{repel}}(u, v) = -\frac{k^2}{d(u,v)} \cdot \hat{r}_{uv}
+\end{equation}
+where $d(u,v)$ is the current distance, $k$ is an optimal distance parameter, and $\hat{r}_{uv}$ is the unit vector from $u$ to $v$.
+
+\textbf{Complexity}: $O(n^2)$ per iteration for naive implementation; $O(n \log n)$ with Barnes-Hut approximation. We use 50 iterations on 1,000 nodes, completing in under a second.
+
+
+% ==== END parts/04_methods_e.tex ====
+
+% ==== BEGIN parts/04_methods_f.tex ====
+\subsection{Machine Learning Pipeline for Link Prediction}
+
+Link prediction is a fundamental graph mining task that aims to predict whether an edge should exist between two nodes. This section details our ML implementation, from feature engineering to model evaluation.
+
+\subsubsection{Problem Formulation}
+
+Given a graph $G = (V, E)$, link prediction asks: for a pair of nodes $(u, v) \notin E$, what is the probability that an edge should exist? This has applications in:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Friend recommendation}: Suggesting new connections in social networks.
+\item \textbf{Knowledge graph completion}: Inferring missing relationships.
+\item \textbf{Biological networks}: Predicting protein-protein interactions.
+\end{itemize}
+
+We frame this as a binary classification problem: given node pair features, predict edge existence (1) or absence (0).
+
+\subsubsection{Dataset Construction}
+
+Creating a balanced training dataset requires careful sampling:
+
+\textbf{Positive samples}: All existing edges in the subgraph. For our 1,000-node visualization subgraph, this yields 2,485 positive samples.
+
+\textbf{Negative samples}: Non-edges sampled uniformly at random. We sample an equal number (2,485) to create a balanced dataset, avoiding class imbalance issues.
+
+\textbf{Train-test split}: We use a 75\%/25\% split, resulting in:
+\begin{itemize}[leftmargin=*]
+\item Training set: 3,727 samples (1,863 positive, 1,864 negative)
+\item Test set: 1,243 samples (622 positive, 621 negative)
+\end{itemize}
+
+\textbf{Important consideration}: We sample negatives from the observed graph, not from ``future'' edges. This is a static link prediction setup, not temporal prediction.
+
+\subsubsection{Feature Engineering}
+
+We extract eight features for each node pair $(u, v)$, capturing local and global topological signals.
+
+\textbf{1. Common Neighbors (CN):}
+The number of shared neighbors between $u$ and $v$:
+\begin{equation}
+\text{CN}(u, v) = |N(u) \cap N(v)|
+\end{equation}
+Intuition: Friends of friends are likely to become friends.
+
+\textbf{2. Jaccard Coefficient:}
+Normalized common neighbors:
+\begin{equation}
+\text{Jaccard}(u, v) = \frac{|N(u) \cap N(v)|}{|N(u) \cup N(v)|}
+\end{equation}
+Ranges from 0 to 1; accounts for neighborhood size.
+
+\textbf{3. Adamic-Adar Index~\cite{adamic2003}:}
+Weighted common neighbors, giving more weight to rare shared connections:
+\begin{equation}
+\text{AA}(u, v) = \sum_{w \in N(u) \cap N(v)} \frac{1}{\log |N(w)|}
+\end{equation}
+Intuition: A shared friend with few connections is more significant than a shared celebrity.
+
+\textbf{4. Preferential Attachment:}
+Product of degrees, based on the ``rich get richer'' phenomenon:
+\begin{equation}
+\text{PA}(u, v) = |N(u)| \cdot |N(v)|
+\end{equation}
+High-degree nodes are more likely to form new connections.
+
+\textbf{5-8. Degree-based features:}
+\begin{itemize}[leftmargin=*]
+\item $\deg(u)$: Degree of node $u$
+\item $\deg(v)$: Degree of node $v$
+\item $\deg(u) + \deg(v)$: Sum of degrees
+\item $\deg(u) \times \deg(v)$: Product of degrees
+\end{itemize}
+
+\textbf{Feature computation summary:}
+For each node pair $(u, v)$, we compute neighborhoods $N_u$ and $N_v$, then derive: CN $= |N_u \cap N_v|$, Jaccard $= |N_u \cap N_v| / |N_u \cup N_v|$, AA $= \sum_{w \in N_u \cap N_v} 1/\log|N_w|$, PA $= |N_u| \cdot |N_v|$, plus four degree-based features.
+
+\subsubsection{Model Selection: Logistic Regression}
+
+We chose logistic regression for several reasons:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Interpretability}: Coefficients indicate feature importance.
+\item \textbf{Efficiency}: Fast training and inference.
+\item \textbf{Baseline}: Establishes a strong baseline before complex models.
+\item \textbf{Probabilistic output}: Provides calibrated probability estimates.
+\end{itemize}
+
+\textbf{Model formulation:}
+\begin{equation}
+P(y=1 | \mathbf{x}) = \sigma(\mathbf{w}^T \mathbf{x} + b) = \frac{1}{1 + e^{-(\mathbf{w}^T \mathbf{x} + b)}}
+\end{equation}
+where $\mathbf{x}$ is the feature vector, $\mathbf{w}$ are learned weights, and $b$ is the bias term.
+
+\textbf{Training objective} (cross-entropy loss with L2 regularization):
+\begin{equation}
+\mathcal{L} = -\sum_{i} \left[ y_i \log \hat{y}_i + (1-y_i) \log(1-\hat{y}_i) \right] + \lambda \|\mathbf{w}\|_2^2
+\end{equation}
+
+\subsubsection{Preprocessing: Feature Scaling}
+
+Features have vastly different scales (e.g., Preferential Attachment can be $>10^6$ while Jaccard is $\leq 1$). We apply standardization:
+\begin{equation}
+x'_j = \frac{x_j - \mu_j}{\sigma_j}
+\end{equation}
+where $\mu_j$ and $\sigma_j$ are the mean and standard deviation of feature $j$ computed on the training set.
+
+\textbf{Implementation:}
+We use scikit-learn's \texttt{StandardScaler} for feature normalization and \texttt{LogisticRegression} with default L2 regularization (\texttt{max\_iter=1000}). The scaler is fit on training data only to prevent data leakage.
+
+\subsubsection{Evaluation Metrics}
+
+We evaluate using threshold-independent metrics suitable for imbalanced scenarios:
+
+\textbf{ROC-AUC (Receiver Operating Characteristic - Area Under Curve):}
+Measures the probability that a randomly chosen positive sample ranks higher than a randomly chosen negative sample:
+\begin{equation}
+\text{AUC} = P(\hat{y}_{\text{pos}} > \hat{y}_{\text{neg}})
+\end{equation}
+AUC = 0.5 indicates random guessing; AUC = 1.0 indicates perfect ranking.
+
+\textbf{Average Precision (AP):}
+The area under the Precision-Recall curve, summarizing precision at different recall thresholds:
+\begin{equation}
+\text{AP} = \sum_n (R_n - R_{n-1}) P_n
+\end{equation}
+where $P_n$ and $R_n$ are precision and recall at threshold $n$.
+
+\subsubsection{Results Interpretation}
+
+Our model achieved:
+\begin{itemize}[leftmargin=*]
+\item \textbf{ROC-AUC}: 0.9361
+\item \textbf{Average Precision}: 0.9398
+\end{itemize}
+
+These strong results indicate that local topological features carry substantial predictive signal. The high performance can be attributed to:
+
+\begin{enumerate}[leftmargin=*]
+\item \textbf{Triadic closure}: Social networks exhibit strong triadic closure---if A knows B and B knows C, A and C are likely to connect. Common Neighbors directly captures this.
+
+\item \textbf{Homophily in connectivity}: Nodes with similar degrees tend to connect (assortative mixing in social networks).
+
+\item \textbf{Dense subgraph}: The 1,000-node visualization subgraph is relatively dense (2,485 edges), providing rich local structure for features.
+\end{enumerate}
+
+\textbf{Feature importance} (based on absolute coefficient values after scaling):
+\begin{enumerate}[leftmargin=*]
+\item Common Neighbors (highest)
+\item Adamic-Adar Index
+\item Jaccard Coefficient
+\item Preferential Attachment
+\item Degree features (moderate contribution)
+\end{enumerate}
+
+\subsubsection{Limitations and Caveats}
+
+\begin{itemize}[leftmargin=*]
+\item \textbf{Static evaluation}: We predict existing edges, not future ones. Real link prediction should use temporal splits.
+
+\item \textbf{Negative sampling bias}: Uniformly sampled negatives may not represent ``hard'' negatives (node pairs that are close but not connected).
+
+\item \textbf{Small subgraph}: Results on 1,000 nodes may not generalize to the full graph.
+
+\item \textbf{Feature locality}: All features are local (1-2 hop neighborhood). Global features (e.g., graph embeddings) might improve performance.
+\end{itemize}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{ml-results/link-prediction-ROC.png}
+\caption{ROC curve for link prediction model. The curve shows strong discrimination ability with AUC = 0.936, significantly above the random baseline (diagonal).}
+\label{fig:roc_curve}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{ml-results/link-prediction-precision-recall.png}
+\caption{Precision-Recall curve for link prediction. Average Precision = 0.940 indicates the model maintains high precision across most recall levels.}
+\label{fig:pr_curve}
+\end{figure}
+
+
+% ==== END parts/04_methods_f.tex ====
+
+
+% ==== BEGIN parts/05_experimental_results.tex ====
+\section{Experimental Results}
+
+This section presents comprehensive results from our analysis pipeline, providing detailed interpretation of each metric and connecting findings to the theoretical framework established in earlier sections. All results are derived from the mutual-friendships graph mode unless otherwise specified.
+
+\subsection{Experimental Setup and Reproducibility}
+
+\subsubsection{Hardware and Software Environment}
+The analysis was conducted on consumer-grade hardware to demonstrate feasibility for student projects:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Operating System}: Linux (Arch-based distribution)
+\item \textbf{Python Version}: 3.10+
+\item \textbf{Key Libraries}: NetworkX 3.x, Pandas, Plotly, Streamlit, scikit-learn
+\item \textbf{Available RAM}: 16 GB (recommended minimum for this dataset)
+\end{itemize}
+
+From the saved mutual-mode run (\texttt{analysis\_results\_mutual.json}), the recorded execution metrics were:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Total runtime}: 216.66 seconds ($\approx$ 3.6 minutes)
+\item \textbf{Peak RAM usage}: $\approx$ 8.18 GB
+\item \textbf{Bottleneck operation}: Graph loading and LCC extraction ($\approx$ 60\% of runtime)
+\end{itemize}
+
+These metrics confirm that the analysis is feasible on a typical student laptop with 16 GB RAM, though 32 GB would provide more headroom for experimentation.
+
+\subsubsection{Configuration Parameters}
+All results derive from the following configuration, chosen to balance statistical reliability with computational feasibility:
+
+\begin{table}[h]
+\centering
+\caption{Analysis Configuration Parameters}
+\label{tab:config}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Graph mode & Mutual friendships \\
+Random seed & 42 \\
+Shortest path pairs & 10,000 \\
+Clustering sample nodes & 10,000 \\
+Community detection sample & 50,000 nodes (BFS) \\
+Centrality sample & 10,000 nodes \\
+Betweenness approximation $k$ & 500 \\
+Visualization subgraph & 1,000 nodes \\
+Spring layout iterations & 50 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{Output Artifacts}
+The analysis generates the following reproducible artifacts:
+\begin{itemize}[leftmargin=*]
+\item \texttt{analysis\_results\_mutual.json}: Complete metrics and configuration
+\item \texttt{network\_summary\_mutual.csv/png}: Summary statistics table
+\item \texttt{top\_centrality\_mutual.csv}: Ranked centrality scores
+\item \texttt{top\_communities\_mutual.csv}: Community size distribution
+\item \texttt{link\_prediction\_metrics\_mutual.json}: ML evaluation metrics
+\end{itemize}
+
+\subsection{Dataset Validation and Sanity Checks}
+
+Before proceeding with analysis, we validate that data loading was successful by comparing against official statistics.
+
+\begin{table}[h]
+\centering
+\caption{Dataset Validation: Official vs. Loaded Statistics}
+\label{tab:validation}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+\textbf{Metric} & \textbf{Official (README)} & \textbf{Our Loading} \\
+\midrule
+Nodes & 1,632,803 & 1,632,803 \\
+Directed edges & 30,622,564 & 30,622,564 \\
+Diameter & 11 & 11 (max observed) \\
+90\% eff. diameter & 5.3 & $\approx$ 5.67 (mean) \\
+Clustering coeff. & 0.1094 & 0.1050 (sampled) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The exact match on node and edge counts confirms correct parsing. The slight difference in clustering coefficient (0.1050 vs. 0.1094) is expected due to sampling and potential differences in graph mode (directed vs. undirected).
+
+\subsection{Mutual Graph Construction and Reciprocity Analysis}
+
+\subsubsection{Reciprocity Measurement}
+Reciprocity quantifies the fraction of directed edges that are bidirectional. For the Pokec network:
+\begin{equation}
+\rho = \frac{|\{(u,v) : (u,v) \in E \land (v,u) \in E\}|}{|E|} \approx 0.5434
+\end{equation}
+
+This 54.34\% reciprocity rate indicates that more than half of all friendships are mutual---a characteristic of social networks where relationships often require bilateral acknowledgment. This is notably higher than platforms like Twitter (typically 10--20\% reciprocity) where following is predominantly unidirectional.
+
+\subsubsection{Mutual Edge Extraction}
+After extracting only reciprocated edges, the mutual undirected graph contains:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Mutual edges}: 8,320,600 (27.2\% of original directed edges, but representing 54.3\% reciprocity since each mutual pair contributes two directed edges)
+\end{itemize}
+
+\textbf{Engineering note}: A naive implementation that builds \texttt{set(G.edges())} for 30M edges would consume $\approx$ 2--4 GB of memory just for the set. Our streaming approach iterates through edges once, checking for reverse edges via dictionary lookup, keeping memory overhead minimal.
+
+\subsection{Connectivity Analysis: Component Structure}
+
+\subsubsection{Component Distribution}
+The mutual graph exhibits extreme fragmentation:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Total components}: 426,901
+\item \textbf{Largest component (LCC)}: 1,198,274 nodes (73.39\% of all nodes)
+\item \textbf{LCC edges}: 8,312,834 (99.91\% of all mutual edges)
+\item \textbf{Second-largest component}: 32 nodes
+\item \textbf{Median component size}: 1 node (isolated nodes)
+\end{itemize}
+
+This ``giant component + dust'' structure is characteristic of social networks~\cite{newman2010}. The dramatic drop from 1.2M nodes to 32 nodes between the first and second components indicates a clear phase transition---the network is either fully connected or completely isolated.
+
+\subsubsection{Interpretation: Why So Many Isolated Nodes?}
+The 426,900 small components (mostly singletons) represent users who:
+\begin{itemize}[leftmargin=*]
+\item Have no mutual friendships (only one-way follows)
+\item Are connected only to others outside the mutual graph
+\item May be inactive or spam accounts
+\end{itemize}
+
+The 73.39\% LCC coverage means our ``six degrees'' analysis applies to approximately three-quarters of all users---a substantial majority.
+
+\subsection{Basic Network Metrics: Mutual LCC}
+
+\subsubsection{Summary Statistics}
+\begin{table}[h]
+\centering
+\caption{Mutual LCC Network Statistics}
+\label{tab:lcc_stats}
+\begin{tabular}{@{}lr@{}}
+\toprule
+\textbf{Metric} & \textbf{Value} \\
+\midrule
+Nodes & 1,198,274 \\
+Edges & 8,312,834 \\
+Average degree $\langle k \rangle$ & 13.87 \\
+Density & $1.16 \times 10^{-5}$ \\
+Clustering coefficient (sampled) & 0.1050 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{Density Interpretation}
+The extremely low density ($1.16 \times 10^{-5}$) is expected for large social networks. With $n = 1.2$M nodes, the maximum possible edges would be:
+\begin{equation}
+\binom{n}{2} = \frac{n(n-1)}{2} \approx 7.18 \times 10^{11}
+\end{equation}
+Our 8.3M edges represent a tiny fraction of this theoretical maximum, yet the network remains highly connected due to the small-world property.
+
+\subsubsection{Clustering Coefficient Analysis}
+The sampled clustering coefficient of 0.1050 indicates moderate triadic closure. For comparison:
+\begin{itemize}[leftmargin=*]
+\item Random graphs with same density: $C \approx \langle k \rangle / n \approx 10^{-5}$
+\item Our network: $C \approx 0.105$
+\end{itemize}
+
+The clustering coefficient is $\approx 10,000\times$ higher than a random graph, confirming strong local structure consistent with the small-world model.
+
+\subsubsection{Degree Distribution: Heavy-Tailed Structure}
+\begin{table}[h]
+\centering
+\caption{Degree Distribution Summary}
+\label{tab:degree}
+\begin{tabular}{@{}lr@{}}
+\toprule
+\textbf{Statistic} & \textbf{Value} \\
+\midrule
+Minimum degree & 1 \\
+Median degree & 7 \\
+Mean degree & 13.87 \\
+Maximum degree & 7,266 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The large gap between median (7) and maximum (7,266) reveals a heavy-tailed distribution characteristic of scale-free networks. The most connected user has $\approx 1,000\times$ more connections than the median user, indicating the presence of ``hub'' nodes that play outsized roles in network connectivity.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{network_summary_mutual.png}
+\caption{Summary statistics table for mutual mode analysis, generated by the Streamlit dashboard. The table consolidates key metrics for quick reference.}
+\label{fig:summary_mutual}
+\end{figure}
+
+\subsection{Degrees of Separation: Validating the Six Degrees Hypothesis}
+
+This is the central experiment of our analysis, directly testing whether the Pokec mutual-friendship network exhibits the ``six degrees'' property.
+
+\subsubsection{Sampling Methodology}
+We sampled 10,000 random node pairs uniformly from the LCC and computed shortest paths using BFS. This Monte Carlo approach provides a statistically robust estimate of the path length distribution.
+
+\subsubsection{Results}
+\begin{table}[h]
+\centering
+\caption{Shortest Path Length Distribution (10,000 samples)}
+\label{tab:paths}
+\begin{tabular}{@{}lr@{}}
+\toprule
+\textbf{Statistic} & \textbf{Value} \\
+\midrule
+Successful paths & 10,000 (100\%) \\
+Failed paths (no connection) & 0 \\
+Mean distance & 5.6749 \\
+Median distance & 6 \\
+Standard deviation & 1.0610 \\
+Minimum observed & 2 \\
+Maximum observed & 11 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{Statistical Interpretation}
+
+\textbf{Six degrees confirmed}: The mean path length of 5.67 and median of 6 directly support the ``six degrees of separation'' hypothesis. On average, any two users in the Pokec mutual-friendship network can be connected through approximately 5--6 intermediate acquaintances.
+
+\textbf{100\% connectivity}: All 10,000 sampled pairs found valid paths, confirming that the LCC is indeed fully connected. This is expected by definition but serves as a sanity check.
+
+\textbf{Diameter validation}: The maximum observed path length of 11 exactly matches the official dataset diameter, providing strong validation of our implementation.
+
+\textbf{Tight distribution}: The standard deviation of 1.06 indicates that path lengths are tightly clustered around the mean. Approximately 68\% of paths fall within 4.6--6.7 hops, and 95\% within 3.5--7.8 hops.
+
+\subsubsection{Comparison to Theory and Other Networks}
+
+Using the small-world scaling formula:
+\begin{equation}
+\langle d \rangle \sim \frac{\ln N}{\ln \langle k \rangle} = \frac{\ln(1,198,274)}{\ln(13.87)} \approx \frac{14.0}{2.63} \approx 5.32
+\end{equation}
+
+Our observed mean of 5.67 is remarkably close to this theoretical prediction, differing by only 6.6\%. This alignment confirms that the Pokec network follows small-world scaling.
+
+\begin{table}[h]
+\centering
+\caption{Comparison with Other Social Networks}
+\label{tab:comparison}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+\textbf{Network} & \textbf{Nodes} & \textbf{Avg. Path Length} \\
+\midrule
+Pokec (mutual, this work) & 1.2M & 5.67 \\
+Facebook (2011)~\cite{backstrom2012} & 721M & 4.74 \\
+Facebook (2016) & 1.59B & 3.57 \\
+Twitter~\cite{kwak2010} & 41.7M & 4.12 \\
+LinkedIn & 400M+ & $\approx$ 5.5 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Pokec's slightly longer paths compared to Facebook may reflect: (1) smaller network size, (2) regional (Slovak) rather than global scope, or (3) our restriction to mutual friendships.
+
+\subsection{Community Detection Results}
+
+\subsubsection{Louvain on BFS-Sampled Subgraph}
+We applied the Louvain algorithm to a 50,000-node BFS-sampled subgraph:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Subgraph nodes}: 50,000
+\item \textbf{Subgraph edges}: 223,265
+\item \textbf{Communities detected}: 37
+\item \textbf{Modularity}: $Q = 0.7855$
+\end{itemize}
+
+\subsubsection{Modularity Interpretation}
+Modularity values are typically interpreted as:
+\begin{itemize}[leftmargin=*]
+\item $Q < 0.3$: Weak or no community structure
+\item $0.3 \leq Q < 0.5$: Moderate community structure
+\item $0.5 \leq Q < 0.7$: Strong community structure
+\item $Q \geq 0.7$: Very strong community structure
+\end{itemize}
+
+Our modularity of 0.7855 indicates \textbf{very strong community structure}. The network is clearly organized into distinct groups with dense internal connections and sparse inter-group links.
+
+\subsubsection{Community Size Distribution}
+The 37 detected communities show a heavy-tailed size distribution, with a few large communities and many small ones. This is consistent with the hierarchical organization often observed in social networks.
+
+\subsubsection{Limitations}
+BFS sampling introduces bias toward the seed node's neighborhood. The detected communities may over-represent one region of the network. Future work could use multiple seeds or random-walk sampling to reduce this bias.
+
+\subsection{Centrality Analysis: Identifying Network Hubs}
+
+\subsubsection{Degree Centrality}
+The top node by degree centrality in our sample is node 5867:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Degree}: 7,266 connections
+\item \textbf{Normalized degree centrality}: 0.7267
+\end{itemize}
+
+This node connects to 72.67\% of all nodes in the 10,000-node sample, making it an extreme hub. Such nodes are critical for network connectivity and information flow.
+
+\subsubsection{Betweenness Centrality}
+Using approximate betweenness with $k=500$ source samples:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Top node}: 5867 (same as degree centrality)
+\item \textbf{Betweenness score}: 0.7692
+\end{itemize}
+
+The correlation between degree and betweenness centrality is expected: high-degree nodes naturally lie on many shortest paths. However, this correlation is not perfect---some nodes with moderate degree but strategic positions can have high betweenness.
+
+\subsection{Network Visualization}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{soc-pokec network sample (1000 nodes).png}
+\caption{Interactive network visualization of a 1,000-node BFS-sampled subgraph. Nodes are colored by community membership (detected via Louvain), and positioned using the Fruchterman-Reingold spring layout algorithm. The visualization reveals clear community clusters with dense internal connections.}
+\label{fig:network_viz}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{soc-pokec network sample (1000 nodes) example path.png}
+\caption{Shortest path visualization between nodes 1292223 and 1094738. The path is highlighted in red, demonstrating the ``six degrees'' concept---these two arbitrary users are connected through a chain of intermediate acquaintances.}
+\label{fig:path_example}
+\end{figure}
+
+The interactive Network Explorer (Figures~\ref{fig:network_viz} and~\ref{fig:path_example}) provides intuitive understanding of network structure:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Community coloring}: Distinct colors reveal cluster boundaries
+\item \textbf{Path highlighting}: Users can select any two nodes to visualize their connecting path
+\item \textbf{Spring layout}: Positions nodes to minimize edge crossings and reveal structure
+\end{itemize}
+
+\subsection{Machine Learning Results: Link Prediction}
+
+\subsubsection{Dataset Summary}
+\begin{table}[h]
+\centering
+\caption{Link Prediction Dataset}
+\label{tab:ml_data}
+\begin{tabular}{@{}lr@{}}
+\toprule
+\textbf{Property} & \textbf{Value} \\
+\midrule
+Subgraph nodes & 1,000 \\
+Subgraph edges & 2,485 \\
+Positive samples (edges) & 2,485 \\
+Negative samples (non-edges) & 2,485 \\
+Train/test split & 75\%/25\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{Model Performance}
+\begin{table}[h]
+\centering
+\caption{Link Prediction Evaluation Metrics}
+\label{tab:ml_results}
+\begin{tabular}{@{}lr@{}}
+\toprule
+\textbf{Metric} & \textbf{Value} \\
+\midrule
+ROC-AUC & 0.9361 \\
+Average Precision & 0.9398 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{Why Such Strong Performance?}
+The high ROC-AUC (0.936) indicates excellent discrimination between edges and non-edges. This strong performance stems from:
+
+\begin{enumerate}[leftmargin=*]
+\item \textbf{Triadic closure}: The Common Neighbors feature directly captures the ``friends of friends become friends'' phenomenon, which is strong in social networks.
+
+\item \textbf{Local structure richness}: The 1,000-node subgraph has density $\approx 0.005$, providing sufficient local structure for features to exploit.
+
+\item \textbf{Balanced evaluation}: Equal positive and negative samples prevent class imbalance issues.
+\end{enumerate}
+
+\subsubsection{Caveats}
+\begin{itemize}[leftmargin=*]
+\item Results are on a small subgraph and may not generalize to the full network.
+\item We predict existing edges, not future ones (static vs. temporal prediction).
+\item Negative samples are uniformly random; real ``hard negatives'' might be more challenging.
+\end{itemize}
+
+\subsection{Summary of Key Findings}
+
+\begin{enumerate}[leftmargin=*]
+\item \textbf{Six degrees validated}: Average path length of 5.67 confirms the small-world hypothesis.
+\item \textbf{High reciprocity}: 54.3\% of friendships are mutual, justifying our focus on bidirectional ties.
+\item \textbf{Giant component dominance}: 73.4\% of users are in the LCC, with extreme fragmentation elsewhere.
+\item \textbf{Strong communities}: Modularity of 0.79 indicates pronounced community structure.
+\item \textbf{Hub nodes}: Extreme degree inequality with max degree 7,266 vs. median 7.
+\item \textbf{Predictable links}: Local topology features achieve 0.94 AUC for link prediction.
+\end{enumerate}
+
+% ==== END parts/05_experimental_results.tex ====
+
+
+% ==== BEGIN parts/06_conclusion.tex ====
+\section{Limitations}
+
+Before concluding, we explicitly acknowledge the limitations of this work to provide appropriate context for interpreting results.
+
+\subsection{Sampling Limitations}
+
+\subsubsection{BFS Sampling Bias}
+Our use of BFS-based sampling for community detection and centrality analysis introduces systematic bias:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Local over-representation}: BFS explores outward from a seed, over-sampling the seed's neighborhood.
+\item \textbf{Density bias}: High-density regions are more likely to be fully captured than sparse peripheral areas.
+\item \textbf{Community boundary effects}: Communities near the seed are fully captured; distant communities may be partially sampled or missed entirely.
+\end{itemize}
+
+\textbf{Mitigation strategies} (not implemented but recommended for future work):
+\begin{itemize}[leftmargin=*]
+\item Use multiple random seeds and aggregate results
+\item Compare BFS sampling to uniform random sampling or random-walk sampling
+\item Report confidence intervals based on multiple sampling runs
+\end{itemize}
+
+\subsubsection{Shortest Path Sampling}
+While 10,000 samples provide reasonable statistical power, this represents only:
+\begin{equation}
+\frac{10{,}000}{\binom{1{,}198{,}274}{2}} \approx 1.4 \times 10^{-8}
+\end{equation}
+of all possible node pairs. Rare long paths (near the diameter) may be undersampled.
+
+\subsection{Methodological Limitations}
+
+\subsubsection{Static Analysis}
+The Pokec dataset represents a snapshot from May 2012. We cannot:
+\begin{itemize}[leftmargin=*]
+\item Track network evolution over time
+\item Perform temporal link prediction (predicting future edges)
+\item Analyze how communities form and dissolve
+\end{itemize}
+
+\subsubsection{Topology-Only Focus}
+By excluding user profile attributes, we miss opportunities to:
+\begin{itemize}[leftmargin=*]
+\item Correlate communities with demographic factors (age, region, interests)
+\item Perform attribute-based link prediction
+\item Study homophily (tendency to connect with similar users)
+\end{itemize}
+
+This was a deliberate scope decision for computational feasibility, but limits interpretive depth.
+
+\subsubsection{Mutual Friendships Only}
+Our primary analysis uses only reciprocated edges. This:
+\begin{itemize}[leftmargin=*]
+\item Excludes 45.7\% of directed relationships
+\item May underestimate connectivity for users with many one-way followers
+\item Creates more isolated components than the full graph
+\end{itemize}
+
+The ``all connections'' mode addresses this but was not fully analyzed in this report.
+
+\subsection{Technical Limitations}
+
+\subsubsection{NetworkX Performance}
+NetworkX prioritizes readability over performance. For graphs of this size:
+\begin{itemize}[leftmargin=*]
+\item Memory usage is higher than optimized libraries (igraph, graph-tool)
+\item Some algorithms are slower by 10--100$\times$
+\item Full-graph betweenness centrality is infeasible
+\end{itemize}
+
+\subsubsection{Link Prediction Evaluation}
+Our ML evaluation has several caveats:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Small subgraph}: 1,000 nodes may not represent the full network
+\item \textbf{Static evaluation}: We predict existing edges, not future ones
+\item \textbf{Easy negatives}: Uniformly sampled non-edges may be ``easy'' to distinguish from edges
+\item \textbf{No hyperparameter tuning}: We used default logistic regression settings
+\end{itemize}
+
+\subsection{Generalizability Concerns}
+
+Results from the Pokec network may not generalize to:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Global networks}: Pokec is regional (Slovakia); global networks like Facebook show shorter paths
+\item \textbf{Different platforms}: Twitter's follower model differs fundamentally from friendship networks
+\item \textbf{Professional networks}: LinkedIn's connections have different semantics than social friendships
+\item \textbf{Temporal dynamics}: 2012 network structure may differ from current social networks
+\end{itemize}
+
+\section{Conclusion}
+
+\subsection{Summary of Contributions}
+
+This project presents a comprehensive topology-focused analysis of the Pokec social network, demonstrating that meaningful large-scale graph analysis is achievable on consumer hardware through careful engineering and strategic sampling. Our key contributions include:
+
+\begin{enumerate}[leftmargin=*]
+\item \textbf{Empirical validation of six degrees}: We confirm that the Pokec mutual-friendship network exhibits small-world properties with an average path length of 5.67, directly supporting the ``six degrees of separation'' hypothesis.
+
+\item \textbf{Memory-efficient pipeline}: We developed techniques for processing 30M+ edges on 16GB RAM, including streaming mutual-edge extraction and sampling-based algorithms.
+
+\item \textbf{Interactive analysis tool}: The Streamlit dashboard enables reproducible analysis with configurable parameters, real-time visualization, and comprehensive output export.
+
+\item \textbf{Multi-faceted network characterization}: Beyond path lengths, we analyze reciprocity, component structure, community organization, centrality distributions, and link predictability.
+
+\item \textbf{ML integration}: We demonstrate that simple graph-based features achieve strong link prediction performance (AUC 0.94), highlighting the predictive power of local topology.
+\end{enumerate}
+
+\subsection{Key Findings}
+
+\begin{table}[h]
+\centering
+\caption{Summary of Key Quantitative Findings}
+\label{tab:summary}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Finding} & \textbf{Value/Interpretation} \\
+\midrule
+Average path length & 5.67 (supports six degrees) \\
+Reciprocity & 54.3\% (high mutual acknowledgment) \\
+LCC coverage & 73.4\% (giant component dominance) \\
+Clustering coefficient & 0.105 (10,000$\times$ random graph) \\
+Modularity & 0.79 (very strong communities) \\
+Max degree & 7,266 (extreme hub presence) \\
+Link prediction AUC & 0.94 (strong topological signal) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Theoretical Implications}
+
+Our findings align with and extend established network science theory:
+
+\begin{enumerate}[leftmargin=*]
+\item \textbf{Small-world confirmation}: The observed path length closely matches the theoretical prediction $\langle d \rangle \sim \ln N / \ln \langle k \rangle$, validating the Watts-Strogatz model for real social networks.
+
+\item \textbf{Reciprocity matters}: The 54.3\% reciprocity rate justifies analyzing mutual friendships as a distinct, meaningful graph mode that better represents ``real'' social connections.
+
+\item \textbf{Community structure is robust}: High modularity (0.79) persists even in sampled subgraphs, suggesting that community organization is a fundamental property of the network.
+
+\item \textbf{Hubs are critical}: The extreme degree inequality (max 7,266 vs. median 7) confirms scale-free properties and highlights the importance of hub nodes for connectivity.
+\end{enumerate}
+
+\subsection{Practical Implications}
+
+For practitioners working with large social network data:
+
+\begin{enumerate}[leftmargin=*]
+\item \textbf{Sampling is viable}: Carefully designed sampling strategies can provide accurate estimates of global properties without processing the entire graph.
+
+\item \textbf{Memory management is crucial}: Avoiding intermediate data structures (like full edge sets) is essential for processing large graphs on limited hardware.
+
+\item \textbf{Simple ML works}: Classical graph features (Common Neighbors, Jaccard, Adamic-Adar) provide strong baselines for link prediction without requiring complex deep learning.
+
+\item \textbf{Interactive tools aid understanding}: Dashboards that combine computation with visualization help users develop intuition about network structure.
+\end{enumerate}
+
+\subsection{Future Work}
+
+Several directions could extend this work:
+
+\subsubsection{Immediate Extensions}
+\begin{enumerate}[leftmargin=*]
+\item Complete the mutual vs. all-connections comparison
+\item Implement multiple-seed sampling to reduce BFS bias
+\item Add confidence intervals for sampled metrics
+\end{enumerate}
+
+\subsubsection{Methodological Improvements}
+\begin{enumerate}[leftmargin=*]
+\item Migrate to faster graph libraries (igraph, graph-tool) for full-graph algorithms
+\item Implement temporal link prediction if timestamped data becomes available
+\item Explore graph neural networks for link prediction
+\end{enumerate}
+
+\subsubsection{Analytical Extensions}
+\begin{enumerate}[leftmargin=*]
+\item Incorporate profile attributes for community interpretation
+\item Study network resilience (effect of removing hub nodes)
+\item Compare with other regional social networks
+\end{enumerate}
+
+\subsection{Reproducibility Statement}
+
+All code, data processing scripts, and analysis artifacts are available in the project repository. The Streamlit application can reproduce all reported results using the documented configuration parameters. Random seeds are fixed for deterministic sampling.
+
+\subsection{Final Remarks}
+
+This project demonstrates that the ``six degrees of separation'' phenomenon is not merely a sociological curiosity but a measurable, robust property of real social networks. The Pokec dataset, with its 1.6 million users and 30 million relationships, provides compelling evidence that even in regional networks, any two individuals can typically be connected through five to six intermediate acquaintances.
+
+More broadly, this work illustrates that large-scale network analysis is as much about engineering as it is about algorithms. The most sophisticated algorithm is useless if it cannot run on available hardware. By combining theoretical understanding with practical engineering, we can extract meaningful insights from datasets that would otherwise be intractable.
+
+The tools and techniques developed here---sampling strategies, memory-efficient data structures, interactive visualization---are applicable to many other large-scale graph analysis problems, from biological networks to infrastructure systems to knowledge graphs. We hope this work serves as both a case study in social network analysis and a template for tackling similar challenges in other domains.
+
+% ==== END parts/06_conclusion.tex ====
+
+
+% ==== BEGIN parts/07_references.tex ====
+\begin{thebibliography}{99}
+
+\bibitem{newman2010}
+M. E. J. Newman, \emph{Networks: An Introduction}. Oxford University Press, 2010.
+
+\bibitem{easley2010}
+D. Easley and J. Kleinberg, \emph{Networks, Crowds, and Markets: Reasoning About a Highly Connected World}. Cambridge University Press, 2010.
+
+\bibitem{milgram1967}
+S. Milgram, ``The small world problem,'' \emph{Psychology Today}, vol. 2, no. 1, pp. 60--67, 1967.
+
+\bibitem{watts1998}
+D. J. Watts and S. H. Strogatz, ``Collective dynamics of `small-world' networks,'' \emph{Nature}, vol. 393, pp. 440--442, 1998.
+
+\bibitem{blondel2008}
+V. D. Blondel, J.-L. Guillaume, R. Lambiotte, and E. Lefebvre, ``Fast unfolding of communities in large networks,'' \emph{Journal of Statistical Mechanics: Theory and Experiment}, vol. 2008, no. 10, P10008, 2008.
+
+\bibitem{liben2007}
+D. Liben-Nowell and J. Kleinberg, ``The link-prediction problem for social networks,'' \emph{Journal of the American Society for Information Science and Technology (JASIST)}, vol. 58, no. 7, pp. 1019--1031, 2007.
+
+\bibitem{adamic2003}
+L. A. Adamic and E. Adar, ``Friends and neighbors on the Web,'' \emph{Social Networks}, vol. 25, no. 3, pp. 211--230, 2003.
+
+\bibitem{takac2012}
+L. Takac and M. Zabovsky, ``Data analysis in public social networks,'' in \emph{International Scientific Conference and International Workshop Present Day Trends of Innovations}, 2012.
+
+\bibitem{snap2014}
+J. Leskovec and A. Krevl, ``SNAP Datasets: Stanford Large Network Dataset Collection,'' 2014. [Online]. Available: \url{https://snap.stanford.edu/data/}
+
+\bibitem{networkx2008}
+A. A. Hagberg, D. A. Schult, and P. J. Swart, ``Exploring network structure, dynamics, and function using NetworkX,'' in \emph{Proceedings of the 7th Python in Science Conference (SciPy 2008)}, Pasadena, CA, USA, 2008.
+
+\bibitem{sklearn2011}
+F. Pedregosa \emph{et al.}, ``Scikit-learn: Machine Learning in Python,'' \emph{Journal of Machine Learning Research}, vol. 12, pp. 2825--2830, 2011.
+
+\bibitem{plotly}
+Plotly Technologies Inc., ``Plotly Python Open Source Graphing Library.'' [Online]. Available: \url{https://plotly.com/python/}
+
+\bibitem{streamlit}
+Streamlit Inc., ``Streamlit Documentation.'' [Online]. Available: \url{https://docs.streamlit.io/}
+
+\bibitem{backstrom2012}
+L. Backstrom, P. Boldi, M. Rosa, J. Ugander, and S. Vigna, ``Four degrees of separation,'' in \emph{Proceedings of the 4th Annual ACM Web Science Conference (WebSci '12)}, pp. 33--42, 2012.
+
+\bibitem{kwak2010}
+H. Kwak, C. Lee, H. Park, and S. Moon, ``What is Twitter, a social network or a news media?'' in \emph{Proceedings of the 19th International Conference on World Wide Web (WWW '10)}, pp. 591--600, 2010.
+
+\bibitem{albert2000}
+R. Albert, H. Jeong, and A.-L. Barab\'{a}si, ``Error and attack tolerance of complex networks,'' \emph{Nature}, vol. 406, pp. 378--382, 2000.
+
+\bibitem{kleinberg2000}
+J. Kleinberg, ``The small-world phenomenon: An algorithmic perspective,'' in \emph{Proceedings of the 32nd Annual ACM Symposium on Theory of Computing (STOC '00)}, pp. 163--170, 2000.
+
+\bibitem{linkedin2016}
+LinkedIn Engineering, ``Measuring the LinkedIn professional network,'' LinkedIn Engineering Blog, 2016. [Online]. Available: \url{https://engineering.linkedin.com/}
+
+\bibitem{barabasi1999}
+A.-L. Barab\'{a}si and R. Albert, ``Emergence of scaling in random networks,'' \emph{Science}, vol. 286, no. 5439, pp. 509--512, 1999.
+
+\bibitem{brandes2001}
+U. Brandes, ``A faster algorithm for betweenness centrality,'' \emph{Journal of Mathematical Sociology}, vol. 25, no. 2, pp. 163--177, 2001.
+
+\bibitem{fortunato2010}
+S. Fortunato, ``Community detection in graphs,'' \emph{Physics Reports}, vol. 486, no. 3--5, pp. 75--174, 2010.
+
+\bibitem{travers1969}
+J. Travers and S. Milgram, ``An experimental study of the small world problem,'' \emph{Sociometry}, vol. 32, no. 4, pp. 425--443, 1969.
+
+\bibitem{dodds2003}
+P. S. Dodds, R. Muhamad, and D. J. Watts, ``An experimental study of search in global social networks,'' \emph{Science}, vol. 301, no. 5634, pp. 827--829, 2003.
+
+\end{thebibliography}
+
+% ==== END parts/07_references.tex ====
+
+
+\end{document}

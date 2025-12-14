@@ -1,0 +1,48 @@
+\section{Introduction}
+
+\subsection{Motivation}
+Online social networks naturally form graphs: users are nodes, and relationships between users are edges. Studying these graphs helps answer questions such as: How connected is the network? Do we observe small-world behavior (short paths between random users)? Are there clear communities (clusters) of users? Which nodes appear to be central or influential from a topological perspective?
+
+For a student project, a realistic dataset is important because toy graphs often hide the practical challenges of data size and computational cost. The Pokec social network (soc-Pokec) from SNAP is a strong choice because it is large, real, and well-documented. The dataset includes more than 1.6 million nodes and more than 30 million directed edges, making it large enough to require careful engineering.
+
+\subsection{Problem statement}
+The central problem of this project is:
+
+\begin{quote}
+How can we perform a meaningful, well-explained topology-focused analysis of the Pokec social network under realistic memory constraints, while producing outputs that are reproducible, interpretable, and easy to explore?
+\end{quote}
+
+This problem includes two types of challenges. First, scientific and analytical challenges: selecting the right metrics, designing experiments (especially for ``six degrees''), and interpreting results responsibly when we rely on sampling. Second, engineering challenges: handling memory limits, choosing graph representations, avoiding expensive intermediate structures, designing a workflow that does not freeze the machine, and building interactive outputs that always correspond to the latest run.
+
+\subsection{Key design idea: topology-first and memory-aware}
+The project deliberately focuses on topology (structure) rather than user attributes. Although Pokec provides a large profile table, using attributes at full scale is expensive and not strictly required to study path lengths, reciprocity, density, clustering, or communities. Keeping the scope focused allows the project to go deeper on graph algorithms and sampling.
+
+Because the full Pokec graph is extremely large, several common patterns are not feasible on a typical laptop: computing all-pairs shortest paths, running full-graph community detection or betweenness centrality, materializing huge Python sets such as \texttt{set(G.edges())} for 30M edges, and attaching per-node attributes through slow per-node DataFrame lookups.
+
+Instead, this project uses a pipeline of ``full graph only when necessary'' operations (e.g., loading edges and extracting the largest component) and sampling-based computations for expensive tasks (shortest paths, community detection, centrality, visualization).
+
+\subsection{Research questions}
+To keep the report focused while still deep and complete, the analysis is organized around the following research questions:
+
+\begin{enumerate}[leftmargin=*]
+\item \textbf{Connectivity and components:} How much of the graph lies in the largest connected component, especially after enforcing reciprocity (mutual friendships)?
+\item \textbf{Small-world behavior / six degrees:} What is the typical shortest-path distance between two users (estimated by sampling), and does it match the ``six degrees'' intuition?
+\item \textbf{Community structure:} Do we observe strong community structure (via Louvain modularity) when analyzing a representative sample subgraph?
+\item \textbf{Centrality and hubs:} Which nodes become central in sampled subgraphs, and what do heavy-tailed degrees imply for connectivity?
+\item \textbf{Practical ML add-on:} Can classical link prediction features provide a strong baseline on a sampled subgraph, and what can we learn from these predictions?
+\end{enumerate}
+
+\subsection{Contributions}
+This project contributes both analysis results and a practical tool:
+
+\begin{itemize}[leftmargin=*]
+\item A Streamlit application that runs the analysis pipeline and supports interactive exploration.
+\item A memory-aware method to construct a mutual friendship graph without building huge intermediate edge sets.
+\item A consistent approach to sampling for shortest paths, clustering, community detection, and centrality.
+\item A network explorer visualization with community coloring and shortest-path highlighting.
+\item A clean separation between live session results and files on disk, avoiding confusion caused by stale artifacts.
+\item An optional ML module for link prediction that stays small and fast.
+\end{itemize}
+
+\subsection{Report organization}
+The remainder of this report follows the required structure: Related Works reviews key background on social network analysis, community detection, and link prediction. Methods describes the dataset, graph construction choices, sampling strategies, and system implementation. Experimental Results reports measured values and provides interpretation. Conclusion summarizes findings, strengths, weaknesses, and future work.

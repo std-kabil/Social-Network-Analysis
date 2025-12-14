@@ -1,0 +1,177 @@
+\subsection{Machine Learning Pipeline for Link Prediction}
+
+Link prediction is a fundamental graph mining task that aims to predict whether an edge should exist between two nodes. This section details our ML implementation, from feature engineering to model evaluation.
+
+\subsubsection{Problem Formulation}
+
+Given a graph $G = (V, E)$, link prediction asks: for a pair of nodes $(u, v) \notin E$, what is the probability that an edge should exist? This has applications in:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Friend recommendation}: Suggesting new connections in social networks.
+\item \textbf{Knowledge graph completion}: Inferring missing relationships.
+\item \textbf{Biological networks}: Predicting protein-protein interactions.
+\end{itemize}
+
+We frame this as a binary classification problem: given node pair features, predict edge existence (1) or absence (0).
+
+\subsubsection{Dataset Construction}
+
+Creating a balanced training dataset requires careful sampling:
+
+\textbf{Positive samples}: All existing edges in the subgraph. For our 1,000-node visualization subgraph, this yields 2,485 positive samples.
+
+\textbf{Negative samples}: Non-edges sampled uniformly at random. We sample an equal number (2,485) to create a balanced dataset, avoiding class imbalance issues.
+
+\textbf{Train-test split}: We use a 75\%/25\% split, resulting in:
+\begin{itemize}[leftmargin=*]
+\item Training set: 3,727 samples (1,863 positive, 1,864 negative)
+\item Test set: 1,243 samples (622 positive, 621 negative)
+\end{itemize}
+
+\textbf{Important consideration}: We sample negatives from the observed graph, not from ``future'' edges. This is a static link prediction setup, not temporal prediction.
+
+\subsubsection{Feature Engineering}
+
+We extract eight features for each node pair $(u, v)$, capturing local and global topological signals.
+
+\textbf{1. Common Neighbors (CN):}
+The number of shared neighbors between $u$ and $v$:
+\begin{equation}
+\text{CN}(u, v) = |N(u) \cap N(v)|
+\end{equation}
+Intuition: Friends of friends are likely to become friends.
+
+\textbf{2. Jaccard Coefficient:}
+Normalized common neighbors:
+\begin{equation}
+\text{Jaccard}(u, v) = \frac{|N(u) \cap N(v)|}{|N(u) \cup N(v)|}
+\end{equation}
+Ranges from 0 to 1; accounts for neighborhood size.
+
+\textbf{3. Adamic-Adar Index~\cite{adamic2003}:}
+Weighted common neighbors, giving more weight to rare shared connections:
+\begin{equation}
+\text{AA}(u, v) = \sum_{w \in N(u) \cap N(v)} \frac{1}{\log |N(w)|}
+\end{equation}
+Intuition: A shared friend with few connections is more significant than a shared celebrity.
+
+\textbf{4. Preferential Attachment:}
+Product of degrees, based on the ``rich get richer'' phenomenon:
+\begin{equation}
+\text{PA}(u, v) = |N(u)| \cdot |N(v)|
+\end{equation}
+High-degree nodes are more likely to form new connections.
+
+\textbf{5-8. Degree-based features:}
+\begin{itemize}[leftmargin=*]
+\item $\deg(u)$: Degree of node $u$
+\item $\deg(v)$: Degree of node $v$
+\item $\deg(u) + \deg(v)$: Sum of degrees
+\item $\deg(u) \times \deg(v)$: Product of degrees
+\end{itemize}
+
+\textbf{Feature computation summary:}
+For each node pair $(u, v)$, we compute neighborhoods $N_u$ and $N_v$, then derive: CN $= |N_u \cap N_v|$, Jaccard $= |N_u \cap N_v| / |N_u \cup N_v|$, AA $= \sum_{w \in N_u \cap N_v} 1/\log|N_w|$, PA $= |N_u| \cdot |N_v|$, plus four degree-based features.
+
+\subsubsection{Model Selection: Logistic Regression}
+
+We chose logistic regression for several reasons:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Interpretability}: Coefficients indicate feature importance.
+\item \textbf{Efficiency}: Fast training and inference.
+\item \textbf{Baseline}: Establishes a strong baseline before complex models.
+\item \textbf{Probabilistic output}: Provides calibrated probability estimates.
+\end{itemize}
+
+\textbf{Model formulation:}
+\begin{equation}
+P(y=1 | \mathbf{x}) = \sigma(\mathbf{w}^T \mathbf{x} + b) = \frac{1}{1 + e^{-(\mathbf{w}^T \mathbf{x} + b)}}
+\end{equation}
+where $\mathbf{x}$ is the feature vector, $\mathbf{w}$ are learned weights, and $b$ is the bias term.
+
+\textbf{Training objective} (cross-entropy loss with L2 regularization):
+\begin{equation}
+\mathcal{L} = -\sum_{i} \left[ y_i \log \hat{y}_i + (1-y_i) \log(1-\hat{y}_i) \right] + \lambda \|\mathbf{w}\|_2^2
+\end{equation}
+
+\subsubsection{Preprocessing: Feature Scaling}
+
+Features have vastly different scales (e.g., Preferential Attachment can be $>10^6$ while Jaccard is $\leq 1$). We apply standardization:
+\begin{equation}
+x'_j = \frac{x_j - \mu_j}{\sigma_j}
+\end{equation}
+where $\mu_j$ and $\sigma_j$ are the mean and standard deviation of feature $j$ computed on the training set.
+
+\textbf{Implementation:}
+We use scikit-learn's \texttt{StandardScaler} for feature normalization and \texttt{LogisticRegression} with default L2 regularization (\texttt{max\_iter=1000}). The scaler is fit on training data only to prevent data leakage.
+
+\subsubsection{Evaluation Metrics}
+
+We evaluate using threshold-independent metrics suitable for imbalanced scenarios:
+
+\textbf{ROC-AUC (Receiver Operating Characteristic - Area Under Curve):}
+Measures the probability that a randomly chosen positive sample ranks higher than a randomly chosen negative sample:
+\begin{equation}
+\text{AUC} = P(\hat{y}_{\text{pos}} > \hat{y}_{\text{neg}})
+\end{equation}
+AUC = 0.5 indicates random guessing; AUC = 1.0 indicates perfect ranking.
+
+\textbf{Average Precision (AP):}
+The area under the Precision-Recall curve, summarizing precision at different recall thresholds:
+\begin{equation}
+\text{AP} = \sum_n (R_n - R_{n-1}) P_n
+\end{equation}
+where $P_n$ and $R_n$ are precision and recall at threshold $n$.
+
+\subsubsection{Results Interpretation}
+
+Our model achieved:
+\begin{itemize}[leftmargin=*]
+\item \textbf{ROC-AUC}: 0.9361
+\item \textbf{Average Precision}: 0.9398
+\end{itemize}
+
+These strong results indicate that local topological features carry substantial predictive signal. The high performance can be attributed to:
+
+\begin{enumerate}[leftmargin=*]
+\item \textbf{Triadic closure}: Social networks exhibit strong triadic closure---if A knows B and B knows C, A and C are likely to connect. Common Neighbors directly captures this.
+
+\item \textbf{Homophily in connectivity}: Nodes with similar degrees tend to connect (assortative mixing in social networks).
+
+\item \textbf{Dense subgraph}: The 1,000-node visualization subgraph is relatively dense (2,485 edges), providing rich local structure for features.
+\end{enumerate}
+
+\textbf{Feature importance} (based on absolute coefficient values after scaling):
+\begin{enumerate}[leftmargin=*]
+\item Common Neighbors (highest)
+\item Adamic-Adar Index
+\item Jaccard Coefficient
+\item Preferential Attachment
+\item Degree features (moderate contribution)
+\end{enumerate}
+
+\subsubsection{Limitations and Caveats}
+
+\begin{itemize}[leftmargin=*]
+\item \textbf{Static evaluation}: We predict existing edges, not future ones. Real link prediction should use temporal splits.
+
+\item \textbf{Negative sampling bias}: Uniformly sampled negatives may not represent ``hard'' negatives (node pairs that are close but not connected).
+
+\item \textbf{Small subgraph}: Results on 1,000 nodes may not generalize to the full graph.
+
+\item \textbf{Feature locality}: All features are local (1-2 hop neighborhood). Global features (e.g., graph embeddings) might improve performance.
+\end{itemize}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{ml-results/link-prediction-ROC.png}
+\caption{ROC curve for link prediction model. The curve shows strong discrimination ability with AUC = 0.936, significantly above the random baseline (diagonal).}
+\label{fig:roc_curve}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{ml-results/link-prediction-precision-recall.png}
+\caption{Precision-Recall curve for link prediction. Average Precision = 0.940 indicates the model maintains high precision across most recall levels.}
+\label{fig:pr_curve}
+\end{figure}
+

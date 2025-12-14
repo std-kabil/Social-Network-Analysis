@@ -32,7 +32,7 @@
         9,
         8
       ],
-      "elapsed_seconds": 33.42392563819885
+      "elapsed_seconds": 33.361008644104004
     }
   },
   "degrees_of_separation": {
@@ -208,6 +208,6 @@
     "k": 0.5,
     "iterations": 50
   },
-  "runtime_seconds": 215.6815540790558,
-  "ram_gb_end": 8.068496704101562
+  "runtime_seconds": 216.66006207466125,
+  "ram_gb_end": 8.184139251708984
 }

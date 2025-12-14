@@ -1,0 +1,39 @@
+\subsection{Reproducibility, parameters, and output artifacts}
+
+\subsubsection{Fixed random seed}
+The analysis uses a fixed random seed (default 42) for random pair selection for shortest paths, node sampling for clustering coefficient, reservoir sampling for visualization, and sampling for link prediction. A fixed seed makes results repeatable, although sampled estimates can still vary slightly with different seeds.
+
+\subsubsection{Configuration saved in the results JSON}
+Each analysis run stores its configuration inside the saved JSON file (\texttt{outputs/analysis\_results\_\{mode\}.json}). This includes graph mode, sample sizes, betweenness approximation parameter, visualization settings, and the degree-histogram cap used for plotting.
+
+\subsubsection{Saved mutual run setup}
+The exported run in this repository includes a full run for mutual mode with the following key settings:
+\begin{itemize}[leftmargin=*]
+\item Shortest path pairs: 10,000
+\item Clustering sample: 10,000 nodes
+\item Community sample: 50,000 nodes (BFS sample)
+\item Centrality sample: 10,000 nodes
+\item Betweenness approximation: $k=500$
+\item Visualization subgraph: 1,000 nodes, spring layout $k=0.5$, iterations=50
+\end{itemize}
+
+\subsubsection{What ``Save results to outputs/'' generates}
+The Streamlit app was enhanced so saving results generates artifacts from the current session (not legacy notebook outputs). It saves:
+\begin{itemize}[leftmargin=*]
+\item Analysis JSON: \texttt{analysis\_results\_\{mode\}.json}
+\item Summary table: \texttt{network\_summary\_\{mode\}.csv} and \texttt{network\_summary\_\{mode\}.png}
+\item Plotly HTML files: degree distribution, path length distribution, network visualization, centrality charts, community sizes, component sizes
+\item CSV tables: top centrality nodes, top communities, component sizes
+\item ML artifacts (if ML ran): metrics JSON, ROC/PR HTML, top predicted edges CSV
+\end{itemize}
+
+\subsubsection{Reproduction steps}
+To reproduce the run:
+\begin{enumerate}[leftmargin=*]
+\item Ensure \texttt{data/soc-pokec-relationships.txt} exists.
+\item Run \texttt{streamlit run app.py}.
+\item Select graph mode and parameters.
+\item Click \textbf{Run analysis}.
+\item (Optional) run \textbf{ML (Link Prediction)}.
+\item Click \textbf{Save results to outputs/}.
+\end{enumerate}

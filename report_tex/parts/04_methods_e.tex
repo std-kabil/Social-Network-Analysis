@@ -1,0 +1,214 @@
+\subsection{Algorithm Details and Complexity Analysis}
+
+This section provides detailed algorithmic descriptions, mathematical formulations, and complexity analysis for the core methods used in this project.
+
+\subsubsection{Breadth-First Search (BFS) for Shortest Paths}
+
+The shortest path between two nodes in an unweighted graph is computed using Breadth-First Search (BFS). BFS explores nodes level by level, guaranteeing that the first time a node is visited, it is via the shortest path.
+
+\textbf{Algorithm 1: BFS Shortest Path}
+
+{\small
+\begin{enumerate}[leftmargin=*, nosep]
+\item Initialize: $\texttt{visited} \gets \{\texttt{source}\}$, $\texttt{queue} \gets [(\texttt{source}, 0)]$
+\item While queue not empty:
+  \begin{enumerate}[nosep]
+  \item Pop $(\texttt{node}, \texttt{dist})$ from queue
+  \item For each neighbor $n$ of node:
+    \begin{itemize}[nosep]
+    \item If $n = \texttt{target}$: return $\texttt{dist} + 1$
+    \item If $n \notin \texttt{visited}$: add to visited and queue
+    \end{itemize}
+  \end{enumerate}
+\item Return $\infty$ (no path)
+\end{enumerate}
+}
+
+\textbf{Complexity Analysis:}
+\begin{itemize}[leftmargin=*]
+\item \textbf{Time complexity}: $O(V + E)$ where $V$ is the number of vertices and $E$ is the number of edges. Each vertex and edge is visited at most once.
+\item \textbf{Space complexity}: $O(V)$ for the visited set and queue.
+\end{itemize}
+
+For our path length estimation, we sample $k$ random pairs and run BFS for each, giving total complexity $O(k(V + E))$. With $k = 10{,}000$ pairs on a graph with $\sim$1.2M nodes and $\sim$8.3M edges, this remains tractable.
+
+\subsubsection{Mathematical Formulation: Shortest Path Length}
+
+For an unweighted graph $G = (V, E)$, the shortest path length $d(u, v)$ between nodes $u$ and $v$ is defined as:
+\begin{equation}
+d(u, v) = \min\{|P| : P \text{ is a path from } u \text{ to } v\}
+\end{equation}
+where $|P|$ denotes the number of edges in path $P$. If no path exists, $d(u, v) = \infty$.
+
+The \textbf{average shortest path length} (characteristic path length) is:
+\begin{equation}
+\langle d \rangle = \frac{1}{n(n-1)} \sum_{u \neq v} d(u, v)
+\end{equation}
+
+Computing this exactly requires $O(n^2)$ BFS operations, which is infeasible for $n > 10^6$. Instead, we estimate $\langle d \rangle$ by sampling:
+\begin{equation}
+\hat{d} = \frac{1}{k} \sum_{i=1}^{k} d(u_i, v_i)
+\end{equation}
+where $(u_i, v_i)$ are $k$ uniformly random node pairs. By the law of large numbers, $\hat{d} \to \langle d \rangle$ as $k \to \infty$.
+
+\subsubsection{Louvain Algorithm for Community Detection}
+
+The Louvain algorithm~\cite{blondel2008} is a greedy optimization method for detecting communities by maximizing \emph{modularity}. It operates in two phases that repeat iteratively.
+
+\textbf{Modularity Definition:}
+Modularity $Q$ measures the quality of a partition by comparing edge density within communities to a null model:
+\begin{equation}
+Q = \frac{1}{2m} \sum_{i,j} \left[ A_{ij} - \frac{k_i k_j}{2m} \right] \delta(c_i, c_j)
+\end{equation}
+where:
+\begin{itemize}[leftmargin=*]
+\item $A_{ij}$ is the adjacency matrix entry (1 if edge exists, 0 otherwise)
+\item $k_i, k_j$ are the degrees of nodes $i$ and $j$
+\item $m = \frac{1}{2}\sum_i k_i$ is the total number of edges
+\item $c_i$ is the community assignment of node $i$
+\item $\delta(c_i, c_j) = 1$ if $c_i = c_j$, else 0
+\end{itemize}
+
+Modularity ranges from $-0.5$ to $1$, with values above $0.3$ typically indicating significant community structure.
+
+\textbf{Algorithm 2: Louvain Community Detection}
+
+{\small
+\textit{Phase 1 (Local optimization):}
+\begin{enumerate}[leftmargin=*, nosep]
+\item For each node $i$: compute $\Delta Q$ for moving $i$ to each neighbor's community
+\item Move $i$ to community with max positive $\Delta Q$
+\item Repeat until no improvement
+\end{enumerate}
+
+\textit{Phase 2 (Aggregation):}
+\begin{enumerate}[leftmargin=*, nosep]
+\item Create super-graph: nodes $=$ communities
+\item Edge weights $=$ sum of inter-community edges
+\end{enumerate}
+
+Repeat Phases 1--2 until modularity converges.
+}
+
+\textbf{Modularity Gain Formula:}
+The change in modularity when moving node $i$ to community $C$ is:
+\begin{equation}
+\Delta Q = \frac{k_{i,\text{in}}}{m} - \frac{\Sigma_{\text{tot}} \cdot k_i}{2m^2}
+\end{equation}
+where $k_{i,\text{in}}$ is the sum of edge weights from $i$ to nodes in $C$, and $\Sigma_{\text{tot}}$ is the sum of all degrees in $C$.
+
+\textbf{Complexity Analysis:}
+\begin{itemize}[leftmargin=*]
+\item \textbf{Time complexity}: $O(n \log n)$ on sparse graphs in practice, though worst-case is $O(n^2)$.
+\item \textbf{Space complexity}: $O(n + m)$ for storing the graph and community assignments.
+\end{itemize}
+
+For our 50,000-node BFS sample, Louvain completes in seconds, making it practical for interactive analysis.
+
+\subsubsection{Centrality Measures}
+
+We compute two centrality measures to identify influential nodes.
+
+\textbf{Degree Centrality:}
+The simplest centrality measure, counting direct connections:
+\begin{equation}
+C_D(v) = \frac{\deg(v)}{n - 1}
+\end{equation}
+where $\deg(v)$ is the degree of node $v$ and $n$ is the total number of nodes. Normalized degree centrality ranges from 0 to 1.
+
+\textbf{Complexity}: $O(n)$ to compute for all nodes (degrees are stored in the graph structure).
+
+\textbf{Betweenness Centrality:}
+Measures how often a node lies on shortest paths between other nodes:
+\begin{equation}
+C_B(v) = \sum_{s \neq v \neq t} \frac{\sigma_{st}(v)}{\sigma_{st}}
+\end{equation}
+where $\sigma_{st}$ is the total number of shortest paths from $s$ to $t$, and $\sigma_{st}(v)$ is the number of those paths passing through $v$.
+
+\textbf{Algorithm 3: Brandes' Betweenness Centrality}
+
+{\small
+\begin{enumerate}[leftmargin=*, nosep]
+\item For each source $s$: run BFS computing distances $d[t]$ and path counts $\sigma[t]$
+\item For each $t$ in reverse BFS order:
+  \begin{itemize}[nosep]
+  \item For each predecessor $p$: $\delta[p] \mathrel{+}= \frac{\sigma[p]}{\sigma[t]}(1 + \delta[t])$
+  \item If $t \neq s$: $\texttt{betweenness}[t] \mathrel{+}= \delta[t]$
+  \end{itemize}
+\end{enumerate}
+}
+
+\textbf{Complexity Analysis:}
+\begin{itemize}[leftmargin=*]
+\item \textbf{Exact}: $O(VE)$ time, $O(V + E)$ space using Brandes' algorithm.
+\item \textbf{Approximate}: $O(kE)$ time by sampling $k$ source nodes.
+\end{itemize}
+
+For our analysis, we use $k = 500$ source nodes, reducing computation from hours to seconds while providing reasonable approximations for ranking purposes.
+
+\subsubsection{Clustering Coefficient}
+
+The local clustering coefficient measures triadic closure around a node:
+\begin{equation}
+C_i = \frac{2 \cdot |\{e_{jk} : v_j, v_k \in N_i, e_{jk} \in E\}|}{k_i(k_i - 1)}
+\end{equation}
+where $N_i$ is the neighborhood of node $i$ and $k_i = |N_i|$ is its degree. This counts the fraction of possible triangles that actually exist.
+
+The \textbf{average clustering coefficient} is:
+\begin{equation}
+\langle C \rangle = \frac{1}{n} \sum_{i=1}^{n} C_i
+\end{equation}
+
+\textbf{Complexity}: Computing $C_i$ for a single node takes $O(k_i^2)$ time. For all nodes, this is $O(\sum_i k_i^2)$, which can be expensive for high-degree nodes. We sample 10,000 nodes to estimate $\langle C \rangle$.
+
+\subsubsection{BFS Sampling for Subgraph Extraction}
+
+To create representative subgraphs for expensive computations, we use BFS sampling starting from a high-degree seed node.
+
+\textbf{Algorithm 4: BFS Subgraph Sampling}
+
+{\small
+\begin{enumerate}[leftmargin=*, nosep]
+\item Initialize: $\texttt{visited} \gets \{\texttt{seed}\}$, $\texttt{queue} \gets [\texttt{seed}]$
+\item While queue not empty and $|\texttt{visited}| < \texttt{max\_nodes}$:
+  \begin{enumerate}[nosep]
+  \item Pop node from queue
+  \item For each unvisited neighbor: add to visited and queue
+  \item Stop if $|\texttt{visited}| \geq \texttt{max\_nodes}$
+  \end{enumerate}
+\item Return induced subgraph on visited nodes
+\end{enumerate}
+}
+
+\textbf{Why BFS sampling?}
+\begin{itemize}[leftmargin=*]
+\item \textbf{Connectivity}: The resulting subgraph is always connected.
+\item \textbf{Local structure preservation}: BFS captures the local neighborhood structure.
+\item \textbf{Determinism}: Given a seed, results are reproducible.
+\end{itemize}
+
+\textbf{Limitations:}
+\begin{itemize}[leftmargin=*]
+\item \textbf{Bias}: Over-represents the dense region around the seed.
+\item \textbf{Not globally representative}: May miss peripheral communities.
+\end{itemize}
+
+We mitigate bias by selecting a high-degree seed (ensuring broad initial reach) and acknowledging that results reflect the sampled region.
+
+\subsubsection{Spring Layout for Visualization}
+
+Network visualization uses the Fruchterman-Reingold force-directed algorithm, which simulates physical forces:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Attractive forces}: Connected nodes attract each other (like springs).
+\item \textbf{Repulsive forces}: All nodes repel each other (like charged particles).
+\end{itemize}
+
+The algorithm iteratively updates node positions until equilibrium:
+\begin{equation}
+\vec{F}_{\text{attract}}(u, v) = \frac{d(u,v)^2}{k} \cdot \hat{r}_{uv}, \quad
+\vec{F}_{\text{repel}}(u, v) = -\frac{k^2}{d(u,v)} \cdot \hat{r}_{uv}
+\end{equation}
+where $d(u,v)$ is the current distance, $k$ is an optimal distance parameter, and $\hat{r}_{uv}$ is the unit vector from $u$ to $v$.
+
+\textbf{Complexity}: $O(n^2)$ per iteration for naive implementation; $O(n \log n)$ with Barnes-Hut approximation. We use 50 iterations on 1,000 nodes, completing in under a second.
+

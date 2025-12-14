@@ -1,0 +1,34 @@
+\subsection{System implementation and engineering challenges}
+
+This project includes a practical system (Streamlit app) that supports reproducible analysis and interactive exploration. This section describes key engineering challenges and how they were solved.
+
+\subsubsection{Notebooks vs Streamlit}
+The initial work started in notebooks, which are good for quick experimentation. However, notebooks can freeze under long-running computations, and it is easy to accidentally create huge intermediate objects. In addition, output artifacts can remain on disk and confuse later results.
+
+Streamlit was introduced to provide a repeatable analysis workflow with interactive parameter control, clear separation between running the analysis and viewing results, and exportable outputs (JSON, CSV, HTML, PNG).
+
+\subsubsection{Memory-driven decisions}
+Memory was the main constraint.
+
+\textbf{Mutual edge construction:} A naive mutual-graph approach builds a set of all edges and checks reverse edges. With 30M edges, a full edge-set can freeze a student machine. The implemented solution iterates through directed edges and checks for reverse edges without materializing a giant set.
+
+\textbf{Avoid per-node profile attachment:} Repeated DataFrame lookups for 1.6M nodes are slow and memory-heavy, so the project focuses on topology only.
+
+\textbf{Avoid full-graph heavy algorithms:} Full community detection and betweenness on the full graph are infeasible; sampling and approximations are used.
+
+\subsubsection{UI state and stale outputs}
+Streamlit reruns the script frequently. Without session state, it is easy to recompute heavy tasks or display stale results.
+
+The app stores the analysis payload, degree arrays, sampled path lengths, and the visualization subgraph in \texttt{st.session\_state}. The full LCC graph is deleted after extracting needed arrays to reduce memory.
+
+A key issue observed during development was confusing old files in \texttt{outputs/} with the latest run. The Outputs tab was redesigned to separate:
+\begin{enumerate}[leftmargin=*]
+\item \textbf{Latest run (from session)}: regenerated from session state.
+\item \textbf{Files on disk}: shown separately and labeled as potentially legacy.
+\end{enumerate}
+
+\subsubsection{Duplicate element IDs}
+Streamlit requires unique keys for charts and widgets. The app assigns unique keys (including a per-run \texttt{run\_id}) to prevent \texttt{StreamlitDuplicateElementId} errors and to force regeneration of plots.
+
+\subsubsection{Exporting results}
+The app exports JSON/CSV summaries and Plotly HTML plots. It also generates a summary table PNG (when Matplotlib is available). These exports directly support report writing.

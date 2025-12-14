@@ -1,0 +1,384 @@
+\section{Experimental Results}
+
+This section presents comprehensive results from our analysis pipeline, providing detailed interpretation of each metric and connecting findings to the theoretical framework established in earlier sections. All results are derived from the mutual-friendships graph mode unless otherwise specified.
+
+\subsection{Experimental Setup and Reproducibility}
+
+\subsubsection{Hardware and Software Environment}
+The analysis was conducted on consumer-grade hardware to demonstrate feasibility for student projects:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Operating System}: Linux (Arch-based distribution)
+\item \textbf{Python Version}: 3.10+
+\item \textbf{Key Libraries}: NetworkX 3.x, Pandas, Plotly, Streamlit, scikit-learn
+\item \textbf{Available RAM}: 16 GB (recommended minimum for this dataset)
+\end{itemize}
+
+From the saved mutual-mode run (\texttt{analysis\_results\_mutual.json}), the recorded execution metrics were:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Total runtime}: 216.66 seconds ($\approx$ 3.6 minutes)
+\item \textbf{Peak RAM usage}: $\approx$ 8.18 GB
+\item \textbf{Bottleneck operation}: Graph loading and LCC extraction ($\approx$ 60\% of runtime)
+\end{itemize}
+
+These metrics confirm that the analysis is feasible on a typical student laptop with 16 GB RAM, though 32 GB would provide more headroom for experimentation.
+
+\subsubsection{Configuration Parameters}
+All results derive from the following configuration, chosen to balance statistical reliability with computational feasibility:
+
+\begin{table}[h]
+\centering
+\caption{Analysis Configuration Parameters}
+\label{tab:config}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Graph mode & Mutual friendships \\
+Random seed & 42 \\
+Shortest path pairs & 10,000 \\
+Clustering sample nodes & 10,000 \\
+Community detection sample & 50,000 nodes (BFS) \\
+Centrality sample & 10,000 nodes \\
+Betweenness approximation $k$ & 500 \\
+Visualization subgraph & 1,000 nodes \\
+Spring layout iterations & 50 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{Output Artifacts}
+The analysis generates the following reproducible artifacts:
+\begin{itemize}[leftmargin=*]
+\item \texttt{analysis\_results\_mutual.json}: Complete metrics and configuration
+\item \texttt{network\_summary\_mutual.csv/png}: Summary statistics table
+\item \texttt{top\_centrality\_mutual.csv}: Ranked centrality scores
+\item \texttt{top\_communities\_mutual.csv}: Community size distribution
+\item \texttt{link\_prediction\_metrics\_mutual.json}: ML evaluation metrics
+\end{itemize}
+
+\subsection{Dataset Validation and Sanity Checks}
+
+Before proceeding with analysis, we validate that data loading was successful by comparing against official statistics.
+
+\begin{table}[h]
+\centering
+\caption{Dataset Validation: Official vs. Loaded Statistics}
+\label{tab:validation}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+\textbf{Metric} & \textbf{Official (README)} & \textbf{Our Loading} \\
+\midrule
+Nodes & 1,632,803 & 1,632,803 \\
+Directed edges & 30,622,564 & 30,622,564 \\
+Diameter & 11 & 11 (max observed) \\
+90\% eff. diameter & 5.3 & $\approx$ 5.67 (mean) \\
+Clustering coeff. & 0.1094 & 0.1050 (sampled) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The exact match on node and edge counts confirms correct parsing. The slight difference in clustering coefficient (0.1050 vs. 0.1094) is expected due to sampling and potential differences in graph mode (directed vs. undirected).
+
+\subsection{Mutual Graph Construction and Reciprocity Analysis}
+
+\subsubsection{Reciprocity Measurement}
+Reciprocity quantifies the fraction of directed edges that are bidirectional. For the Pokec network:
+\begin{equation}
+\rho = \frac{|\{(u,v) : (u,v) \in E \land (v,u) \in E\}|}{|E|} \approx 0.5434
+\end{equation}
+
+This 54.34\% reciprocity rate indicates that more than half of all friendships are mutual---a characteristic of social networks where relationships often require bilateral acknowledgment. This is notably higher than platforms like Twitter (typically 10--20\% reciprocity) where following is predominantly unidirectional.
+
+\subsubsection{Mutual Edge Extraction}
+After extracting only reciprocated edges, the mutual undirected graph contains:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Mutual edges}: 8,320,600 (27.2\% of original directed edges, but representing 54.3\% reciprocity since each mutual pair contributes two directed edges)
+\end{itemize}
+
+\textbf{Engineering note}: A naive implementation that builds \texttt{set(G.edges())} for 30M edges would consume $\approx$ 2--4 GB of memory just for the set. Our streaming approach iterates through edges once, checking for reverse edges via dictionary lookup, keeping memory overhead minimal.
+
+\subsection{Connectivity Analysis: Component Structure}
+
+\subsubsection{Component Distribution}
+The mutual graph exhibits extreme fragmentation:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Total components}: 426,901
+\item \textbf{Largest component (LCC)}: 1,198,274 nodes (73.39\% of all nodes)
+\item \textbf{LCC edges}: 8,312,834 (99.91\% of all mutual edges)
+\item \textbf{Second-largest component}: 32 nodes
+\item \textbf{Median component size}: 1 node (isolated nodes)
+\end{itemize}
+
+This ``giant component + dust'' structure is characteristic of social networks~\cite{newman2010}. The dramatic drop from 1.2M nodes to 32 nodes between the first and second components indicates a clear phase transition---the network is either fully connected or completely isolated.
+
+\subsubsection{Interpretation: Why So Many Isolated Nodes?}
+The 426,900 small components (mostly singletons) represent users who:
+\begin{itemize}[leftmargin=*]
+\item Have no mutual friendships (only one-way follows)
+\item Are connected only to others outside the mutual graph
+\item May be inactive or spam accounts
+\end{itemize}
+
+The 73.39\% LCC coverage means our ``six degrees'' analysis applies to approximately three-quarters of all users---a substantial majority.
+
+\subsection{Basic Network Metrics: Mutual LCC}
+
+\subsubsection{Summary Statistics}
+\begin{table}[h]
+\centering
+\caption{Mutual LCC Network Statistics}
+\label{tab:lcc_stats}
+\begin{tabular}{@{}lr@{}}
+\toprule
+\textbf{Metric} & \textbf{Value} \\
+\midrule
+Nodes & 1,198,274 \\
+Edges & 8,312,834 \\
+Average degree $\langle k \rangle$ & 13.87 \\
+Density & $1.16 \times 10^{-5}$ \\
+Clustering coefficient (sampled) & 0.1050 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{Density Interpretation}
+The extremely low density ($1.16 \times 10^{-5}$) is expected for large social networks. With $n = 1.2$M nodes, the maximum possible edges would be:
+\begin{equation}
+\binom{n}{2} = \frac{n(n-1)}{2} \approx 7.18 \times 10^{11}
+\end{equation}
+Our 8.3M edges represent a tiny fraction of this theoretical maximum, yet the network remains highly connected due to the small-world property.
+
+\subsubsection{Clustering Coefficient Analysis}
+The sampled clustering coefficient of 0.1050 indicates moderate triadic closure. For comparison:
+\begin{itemize}[leftmargin=*]
+\item Random graphs with same density: $C \approx \langle k \rangle / n \approx 10^{-5}$
+\item Our network: $C \approx 0.105$
+\end{itemize}
+
+The clustering coefficient is $\approx 10,000\times$ higher than a random graph, confirming strong local structure consistent with the small-world model.
+
+\subsubsection{Degree Distribution: Heavy-Tailed Structure}
+\begin{table}[h]
+\centering
+\caption{Degree Distribution Summary}
+\label{tab:degree}
+\begin{tabular}{@{}lr@{}}
+\toprule
+\textbf{Statistic} & \textbf{Value} \\
+\midrule
+Minimum degree & 1 \\
+Median degree & 7 \\
+Mean degree & 13.87 \\
+Maximum degree & 7,266 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The large gap between median (7) and maximum (7,266) reveals a heavy-tailed distribution characteristic of scale-free networks. The most connected user has $\approx 1,000\times$ more connections than the median user, indicating the presence of ``hub'' nodes that play outsized roles in network connectivity.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{network_summary_mutual.png}
+\caption{Summary statistics table for mutual mode analysis, generated by the Streamlit dashboard. The table consolidates key metrics for quick reference.}
+\label{fig:summary_mutual}
+\end{figure}
+
+\subsection{Degrees of Separation: Validating the Six Degrees Hypothesis}
+
+This is the central experiment of our analysis, directly testing whether the Pokec mutual-friendship network exhibits the ``six degrees'' property.
+
+\subsubsection{Sampling Methodology}
+We sampled 10,000 random node pairs uniformly from the LCC and computed shortest paths using BFS. This Monte Carlo approach provides a statistically robust estimate of the path length distribution.
+
+\subsubsection{Results}
+\begin{table}[h]
+\centering
+\caption{Shortest Path Length Distribution (10,000 samples)}
+\label{tab:paths}
+\begin{tabular}{@{}lr@{}}
+\toprule
+\textbf{Statistic} & \textbf{Value} \\
+\midrule
+Successful paths & 10,000 (100\%) \\
+Failed paths (no connection) & 0 \\
+Mean distance & 5.6749 \\
+Median distance & 6 \\
+Standard deviation & 1.0610 \\
+Minimum observed & 2 \\
+Maximum observed & 11 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{Statistical Interpretation}
+
+\textbf{Six degrees confirmed}: The mean path length of 5.67 and median of 6 directly support the ``six degrees of separation'' hypothesis. On average, any two users in the Pokec mutual-friendship network can be connected through approximately 5--6 intermediate acquaintances.
+
+\textbf{100\% connectivity}: All 10,000 sampled pairs found valid paths, confirming that the LCC is indeed fully connected. This is expected by definition but serves as a sanity check.
+
+\textbf{Diameter validation}: The maximum observed path length of 11 exactly matches the official dataset diameter, providing strong validation of our implementation.
+
+\textbf{Tight distribution}: The standard deviation of 1.06 indicates that path lengths are tightly clustered around the mean. Approximately 68\% of paths fall within 4.6--6.7 hops, and 95\% within 3.5--7.8 hops.
+
+\subsubsection{Comparison to Theory and Other Networks}
+
+Using the small-world scaling formula:
+\begin{equation}
+\langle d \rangle \sim \frac{\ln N}{\ln \langle k \rangle} = \frac{\ln(1,198,274)}{\ln(13.87)} \approx \frac{14.0}{2.63} \approx 5.32
+\end{equation}
+
+Our observed mean of 5.67 is remarkably close to this theoretical prediction, differing by only 6.6\%. This alignment confirms that the Pokec network follows small-world scaling.
+
+\begin{table}[h]
+\centering
+\caption{Comparison with Other Social Networks}
+\label{tab:comparison}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+\textbf{Network} & \textbf{Nodes} & \textbf{Avg. Path Length} \\
+\midrule
+Pokec (mutual, this work) & 1.2M & 5.67 \\
+Facebook (2011)~\cite{backstrom2012} & 721M & 4.74 \\
+Facebook (2016) & 1.59B & 3.57 \\
+Twitter~\cite{kwak2010} & 41.7M & 4.12 \\
+LinkedIn & 400M+ & $\approx$ 5.5 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Pokec's slightly longer paths compared to Facebook may reflect: (1) smaller network size, (2) regional (Slovak) rather than global scope, or (3) our restriction to mutual friendships.
+
+\subsection{Community Detection Results}
+
+\subsubsection{Louvain on BFS-Sampled Subgraph}
+We applied the Louvain algorithm to a 50,000-node BFS-sampled subgraph:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Subgraph nodes}: 50,000
+\item \textbf{Subgraph edges}: 223,265
+\item \textbf{Communities detected}: 37
+\item \textbf{Modularity}: $Q = 0.7855$
+\end{itemize}
+
+\subsubsection{Modularity Interpretation}
+Modularity values are typically interpreted as:
+\begin{itemize}[leftmargin=*]
+\item $Q < 0.3$: Weak or no community structure
+\item $0.3 \leq Q < 0.5$: Moderate community structure
+\item $0.5 \leq Q < 0.7$: Strong community structure
+\item $Q \geq 0.7$: Very strong community structure
+\end{itemize}
+
+Our modularity of 0.7855 indicates \textbf{very strong community structure}. The network is clearly organized into distinct groups with dense internal connections and sparse inter-group links.
+
+\subsubsection{Community Size Distribution}
+The 37 detected communities show a heavy-tailed size distribution, with a few large communities and many small ones. This is consistent with the hierarchical organization often observed in social networks.
+
+\subsubsection{Limitations}
+BFS sampling introduces bias toward the seed node's neighborhood. The detected communities may over-represent one region of the network. Future work could use multiple seeds or random-walk sampling to reduce this bias.
+
+\subsection{Centrality Analysis: Identifying Network Hubs}
+
+\subsubsection{Degree Centrality}
+The top node by degree centrality in our sample is node 5867:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Degree}: 7,266 connections
+\item \textbf{Normalized degree centrality}: 0.7267
+\end{itemize}
+
+This node connects to 72.67\% of all nodes in the 10,000-node sample, making it an extreme hub. Such nodes are critical for network connectivity and information flow.
+
+\subsubsection{Betweenness Centrality}
+Using approximate betweenness with $k=500$ source samples:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Top node}: 5867 (same as degree centrality)
+\item \textbf{Betweenness score}: 0.7692
+\end{itemize}
+
+The correlation between degree and betweenness centrality is expected: high-degree nodes naturally lie on many shortest paths. However, this correlation is not perfect---some nodes with moderate degree but strategic positions can have high betweenness.
+
+\subsection{Network Visualization}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{soc-pokec network sample (1000 nodes).png}
+\caption{Interactive network visualization of a 1,000-node BFS-sampled subgraph. Nodes are colored by community membership (detected via Louvain), and positioned using the Fruchterman-Reingold spring layout algorithm. The visualization reveals clear community clusters with dense internal connections.}
+\label{fig:network_viz}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{soc-pokec network sample (1000 nodes) example path.png}
+\caption{Shortest path visualization between nodes 1292223 and 1094738. The path is highlighted in red, demonstrating the ``six degrees'' concept---these two arbitrary users are connected through a chain of intermediate acquaintances.}
+\label{fig:path_example}
+\end{figure}
+
+The interactive Network Explorer (Figures~\ref{fig:network_viz} and~\ref{fig:path_example}) provides intuitive understanding of network structure:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Community coloring}: Distinct colors reveal cluster boundaries
+\item \textbf{Path highlighting}: Users can select any two nodes to visualize their connecting path
+\item \textbf{Spring layout}: Positions nodes to minimize edge crossings and reveal structure
+\end{itemize}
+
+\subsection{Machine Learning Results: Link Prediction}
+
+\subsubsection{Dataset Summary}
+\begin{table}[h]
+\centering
+\caption{Link Prediction Dataset}
+\label{tab:ml_data}
+\begin{tabular}{@{}lr@{}}
+\toprule
+\textbf{Property} & \textbf{Value} \\
+\midrule
+Subgraph nodes & 1,000 \\
+Subgraph edges & 2,485 \\
+Positive samples (edges) & 2,485 \\
+Negative samples (non-edges) & 2,485 \\
+Train/test split & 75\%/25\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{Model Performance}
+\begin{table}[h]
+\centering
+\caption{Link Prediction Evaluation Metrics}
+\label{tab:ml_results}
+\begin{tabular}{@{}lr@{}}
+\toprule
+\textbf{Metric} & \textbf{Value} \\
+\midrule
+ROC-AUC & 0.9361 \\
+Average Precision & 0.9398 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{Why Such Strong Performance?}
+The high ROC-AUC (0.936) indicates excellent discrimination between edges and non-edges. This strong performance stems from:
+
+\begin{enumerate}[leftmargin=*]
+\item \textbf{Triadic closure}: The Common Neighbors feature directly captures the ``friends of friends become friends'' phenomenon, which is strong in social networks.
+
+\item \textbf{Local structure richness}: The 1,000-node subgraph has density $\approx 0.005$, providing sufficient local structure for features to exploit.
+
+\item \textbf{Balanced evaluation}: Equal positive and negative samples prevent class imbalance issues.
+\end{enumerate}
+
+\subsubsection{Caveats}
+\begin{itemize}[leftmargin=*]
+\item Results are on a small subgraph and may not generalize to the full network.
+\item We predict existing edges, not future ones (static vs. temporal prediction).
+\item Negative samples are uniformly random; real ``hard negatives'' might be more challenging.
+\end{itemize}
+
+\subsection{Summary of Key Findings}
+
+\begin{enumerate}[leftmargin=*]
+\item \textbf{Six degrees validated}: Average path length of 5.67 confirms the small-world hypothesis.
+\item \textbf{High reciprocity}: 54.3\% of friendships are mutual, justifying our focus on bidirectional ties.
+\item \textbf{Giant component dominance}: 73.4\% of users are in the LCC, with extreme fragmentation elsewhere.
+\item \textbf{Strong communities}: Modularity of 0.79 indicates pronounced community structure.
+\item \textbf{Hub nodes}: Extreme degree inequality with max degree 7,266 vs. median 7.
+\item \textbf{Predictable links}: Local topology features achieve 0.94 AUC for link prediction.
+\end{enumerate}

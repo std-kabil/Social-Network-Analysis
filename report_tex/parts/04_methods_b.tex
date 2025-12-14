@@ -1,0 +1,47 @@
+\subsection{Sampling strategy and algorithms}
+
+This project studies a very large network (over 1.6M nodes). Many standard algorithms that work on small graphs are not feasible at this scale in a typical student environment. Therefore, the core method is:
+
+\begin{quote}
+Use the full graph only for operations that are linear or near-linear in the number of edges/nodes, and use sampling for operations that scale super-linearly (or require many shortest-path computations).
+\end{quote}
+
+\subsubsection{Overall pipeline}
+For a chosen graph mode (\texttt{mutual} or \texttt{all}), the analysis pipeline is:
+\begin{enumerate}[leftmargin=*]
+\item Load or build the graph.
+\item Extract the LCC.
+\item Compute degrees and basic metrics.
+\item Estimate shortest-path length distribution by sampling random node pairs.
+\item Estimate clustering coefficient by sampling nodes.
+\item Run Louvain community detection on a BFS-sampled subgraph.
+\item Compute centrality rankings on a sampled subgraph.
+\item Build a visualization subgraph and compute a spring layout.
+\end{enumerate}
+
+\subsubsection{Graph loading: why NetworkX}
+NetworkX is not the fastest library for huge graphs, but it is widely used in education and easy to understand. The project targets university student-level readability.
+
+We considered faster libraries such as igraph or graph-tool, but they add installation complexity and reduce portability. The main requirement here is clear reasoning and reproducible results rather than maximum performance.
+
+\subsubsection{Basic metrics and degree statistics}
+On the LCC we compute number of nodes/edges, average degree, density, and degree summary (min/median/max). Real social networks often show heavy-tailed degree distributions. This affects connectivity and also makes visualization more difficult.
+
+For plotting, the app samples degrees for responsiveness and supports a percentile cap (default 99\%) to zoom the x-axis. This is a visualization choice that improves readability without changing computed metrics.
+
+\subsubsection{Shortest paths (degrees of separation)}
+Exact average shortest path length is not feasible at this scale. We estimate the shortest path length distribution by sampling \texttt{num\_pairs} random pairs of nodes from the LCC and computing shortest path lengths. The output includes mean/median/std/min/max and counts of failures.
+
+\subsubsection{Clustering coefficient (sampled)}
+Computing clustering for all nodes is expensive. We sample \texttt{clustering\_sample} nodes and compute their clustering coefficients, then average the values. The report treats this as an estimate and reports the sampling size.
+
+\subsubsection{Community detection (Louvain) on a sampled subgraph}
+Running Louvain on the full LCC is expensive. We construct a BFS-sampled subgraph (e.g., 50,000 nodes) starting from a high-degree node, then run Louvain and report number of communities and modularity.
+
+BFS sampling tends to preserve local structure and connectivity (useful for community detection), but it introduces bias toward the start region. This limitation is acknowledged in the report.
+
+\subsubsection{Centrality analysis on a sampled subgraph}
+Degree centrality is computed directly on a sampled connected subgraph. Betweenness centrality is approximated using NetworkX's sampling parameter $k$.
+
+\subsubsection{Visualization subgraph}
+Visualizing millions of nodes is impossible in a browser. The project builds a 1,000-node visualization subgraph using reservoir sampling plus BFS from a high-degree seed node, then computes a spring layout with tunable parameters (layout $k$ and iterations). Communities are computed on the visualization subgraph for coloring.

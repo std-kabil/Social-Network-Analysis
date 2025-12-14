@@ -1,0 +1,20 @@
+{
+  "mode": "mutual",
+  "nodes": 1000,
+  "edges": 2485,
+  "dataset_pos": 2485,
+  "dataset_neg": 2485,
+  "test_size": 0.25,
+  "roc_auc": 0.9360524721562049,
+  "average_precision": 0.9398270819187103,
+  "features": [
+    "common_neighbors",
+    "jaccard",
+    "adamic_adar",
+    "preferential_attachment",
+    "deg_u",
+    "deg_v",
+    "deg_sum",
+    "deg_product"
+  ]
+}

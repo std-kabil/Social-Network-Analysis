@@ -1,0 +1,32 @@
+\section{Methods}
+
+\subsection{Dataset and graph construction}
+
+\subsubsection{Dataset: Pokec social network (soc-Pokec)}
+The dataset used is the Pokec social network provided by SNAP. Pokec is the most popular Slovak online social network. The dataset is anonymized and contains relationships and user profile data for the whole network. Friendships in the Pokec network are oriented (directed). The dataset was crawled during May 25--27, 2012.
+
+From the official dataset readme, the reported statistics are: 1,632,803 nodes and 30,622,564 directed edges; the largest weakly connected component contains all nodes and edges; the largest strongly connected component contains 1,304,537 nodes (0.799) and 29,183,655 edges (0.953); the average clustering coefficient is 0.1094; the reported diameter is 11; and the 90-percentile effective diameter is 5.3.
+
+\subsubsection{Why topology-only (and why not profiles)}
+The dataset also provides a wide profile table with many attributes in Slovak. In early notebook attempts, attaching profile attributes to every node caused major performance issues (slow per-node lookups and high memory usage). Because the project objective is graph topology, the profile table was excluded from the main analysis.
+
+This is an important design decision:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Why not profiles?} They introduce a second large dataset and shift the project toward attribute/text analysis, which is outside the scope.
+\item \textbf{Why topology?} Topology supports clear metrics (paths, clustering, communities), and we can explain tradeoffs and sampling while staying within practical constraints.
+\end{itemize}
+
+\subsubsection{Graph representations and modes}
+The Pokec relationships are directed. There are multiple valid ways to interpret this, and each choice affects results. This project implements two graph modes:
+
+\textbf{Mutual friendships only (reciprocal edges):} A mutual friendship is a pair $(u,v)$ such that both directed edges exist: $u\rightarrow v$ and $v\rightarrow u$. The mutual graph is undirected and contains only reciprocal edges.
+
+\textbf{All connections (undirected view):} Each directed edge is treated as an undirected connection. This produces an undirected graph representing that some relationship exists between $u$ and $v$, without requiring reciprocity.
+
+We keep both modes because mutual ties can be interpreted as stronger relationships, while all-connections is closer to the raw data and may increase connectivity.
+
+\subsubsection{Largest connected component (LCC)}
+Many real-world networks contain many small disconnected components. Several algorithms assume connectivity or become hard to interpret when the graph is fragmented. Therefore, the analysis extracts the largest connected component (LCC) and performs most measurements on it. This reduces ``no path'' events and focuses on the main part of the social network.
+
+\subsubsection{Reproducibility and configuration}
+All experiments are controlled by a configuration including graph mode, random seed, and sample sizes (shortest-path pairs, clustering nodes, community nodes, centrality nodes) as well as visualization parameters. The configuration is stored in the saved results JSON.

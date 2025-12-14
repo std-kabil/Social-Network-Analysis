@@ -1,0 +1,126 @@
+\section{The Six Degrees of Separation: Theory and Background}
+
+This section provides a comprehensive overview of the ``six degrees of separation'' concept, tracing its origins from sociological experiments to modern computational validations on massive online networks.
+
+\subsection{Historical Origins: Milgram's Small World Experiment}
+
+The phrase ``six degrees of separation'' originates from a series of experiments conducted by social psychologist Stanley Milgram in the 1960s~\cite{milgram1967}. In his most famous study, Milgram asked randomly selected individuals in Omaha, Nebraska and Wichita, Kansas to forward a letter to a target person in Boston, Massachusetts. Participants could only send the letter to someone they knew personally on a first-name basis, who would then forward it similarly until it reached the target.
+
+\subsubsection{Experimental Design}
+Milgram's methodology was elegantly simple:
+\begin{enumerate}[leftmargin=*]
+\item \textbf{Source selection}: Random individuals from the Midwest United States.
+\item \textbf{Target specification}: A stockbroker in Boston (chosen for geographic and social distance).
+\item \textbf{Forwarding rule}: Each participant could only pass the letter to a personal acquaintance.
+\item \textbf{Tracking}: Each letter contained a roster to track the chain of intermediaries.
+\end{enumerate}
+
+\subsubsection{Key Findings}
+Of the letters that successfully reached the target, the median number of intermediaries was approximately six. This surprising result suggested that despite the vast size of the American population, social networks possess a ``small-world'' property where any two individuals are connected by remarkably short chains.
+
+However, Milgram's experiment had significant limitations:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Low completion rate}: Only about 29\% of chains were completed.
+\item \textbf{Selection bias}: Participants who forwarded letters may have been more socially connected.
+\item \textbf{Geographic constraints}: The experiment was limited to the United States.
+\end{itemize}
+
+Despite these limitations, the ``six degrees'' concept captured public imagination and became a foundational idea in network science.
+
+\subsection{Mathematical Formalization: Small-World Networks}
+
+The theoretical underpinning of the six degrees phenomenon was formalized by Watts and Strogatz in their landmark 1998 paper~\cite{watts1998}. They introduced the \emph{small-world network model}, which explains how networks can simultaneously exhibit:
+\begin{enumerate}[leftmargin=*]
+\item \textbf{High clustering}: Friends of friends tend to be friends (triadic closure).
+\item \textbf{Short average path lengths}: Any two nodes can be reached in few hops.
+\end{enumerate}
+
+\subsubsection{The Watts-Strogatz Model}
+The model begins with a regular ring lattice where each node connects to its $k$ nearest neighbors. Then, with probability $p$, each edge is ``rewired'' to a random node. This simple mechanism produces networks with:
+
+\begin{equation}
+L(p) \sim \frac{N}{2k} f_1(pNk) \quad \text{and} \quad C(p) \sim \frac{3(k-2)}{4(k-1)} f_2(pNk)
+\end{equation}
+
+where $L$ is the average path length, $C$ is the clustering coefficient, $N$ is the number of nodes, and $f_1, f_2$ are scaling functions. For intermediate values of $p$, the network exhibits both high clustering (like regular lattices) and short paths (like random graphs).
+
+\subsubsection{Characteristic Path Length}
+For a small-world network, the average shortest path length $\langle d \rangle$ scales logarithmically with network size:
+\begin{equation}
+\langle d \rangle \sim \frac{\ln N}{\ln \langle k \rangle}
+\end{equation}
+where $N$ is the number of nodes and $\langle k \rangle$ is the average degree. This logarithmic scaling explains why even networks with millions of nodes can have average path lengths of only 5--7.
+
+\subsection{Modern Validations on Online Social Networks}
+
+The advent of large-scale online social networks provided unprecedented opportunities to test the six degrees hypothesis on complete population-scale graphs.
+
+\subsubsection{Facebook's Four Degrees Study (2011)}
+In 2011, researchers at Facebook analyzed the complete social graph of 721 million active users with 69 billion friendship links~\cite{backstrom2012}. Their findings were striking:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Average distance}: 4.74 hops (later updated to 3.57 in 2016 with 1.59 billion users).
+\item \textbf{99.6\% reachability}: Almost all user pairs were connected.
+\item \textbf{Decreasing trend}: As the network grew, average distance actually decreased.
+\end{itemize}
+
+This study provided the first definitive evidence that the six degrees hypothesis holds---and is even conservative---for modern social networks.
+
+\subsubsection{Twitter and Directed Networks}
+Studies on Twitter revealed different dynamics due to its directed follower model~\cite{kwak2010}. The average path length was approximately 4.12 when considering follower relationships, but the network exhibited lower reciprocity than Facebook, highlighting how platform design affects network topology.
+
+\subsubsection{LinkedIn's Professional Network}
+LinkedIn's analysis of its professional network found average path lengths of approximately 5.5 hops, slightly longer than Facebook, possibly reflecting the more selective nature of professional connections~\cite{linkedin2016}.
+
+\subsection{Mutual Friendships vs. One-Way Follows}
+
+A critical distinction in social network analysis is between \emph{directed} and \emph{undirected} relationships, which has direct implications for the six degrees concept.
+
+\subsubsection{Directed Relationships}
+In platforms like Twitter or Instagram, user A can follow user B without reciprocation. This creates a directed graph where:
+\begin{itemize}[leftmargin=*]
+\item Paths may exist in one direction but not the other.
+\item ``Degrees of separation'' becomes asymmetric.
+\item Celebrity nodes create highly skewed degree distributions.
+\end{itemize}
+
+\subsubsection{Mutual (Reciprocal) Friendships}
+In contrast, mutual friendships---where both parties acknowledge the relationship---more closely model real-world acquaintance chains:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Bidirectional trust}: Both parties recognize the connection.
+\item \textbf{Symmetric paths}: If A can reach B, then B can reach A.
+\item \textbf{Stronger ties}: Reciprocated relationships often indicate closer connections.
+\end{itemize}
+
+The Pokec dataset provides directed edges, but approximately 54.3\% of relationships are reciprocated. By extracting only mutual friendships, we create a graph that better represents the ``acquaintance chains'' in Milgram's original conception.
+
+\subsection{Why This Matters: Implications of Small-World Structure}
+
+The small-world property has profound implications beyond mere curiosity:
+
+\subsubsection{Information Diffusion}
+Short path lengths enable rapid information spread. News, rumors, and viral content can reach large populations in few transmission steps. This has implications for:
+\begin{itemize}[leftmargin=*]
+\item Marketing and viral campaigns
+\item Misinformation spread
+\item Public health communication
+\end{itemize}
+
+\subsubsection{Network Resilience}
+Small-world networks are typically robust to random node failures but vulnerable to targeted attacks on high-degree hubs~\cite{albert2000}. Understanding path length distributions helps assess network vulnerability.
+
+\subsubsection{Search and Navigation}
+Milgram's experiment demonstrated not just that short paths exist, but that people can \emph{find} them using only local information. This ``navigability'' property has inspired decentralized search algorithms and peer-to-peer network designs~\cite{kleinberg2000}.
+
+\subsection{Research Questions for This Project}
+
+Given this theoretical background, our analysis of the Pokec network addresses several specific questions:
+
+\begin{enumerate}[leftmargin=*]
+\item \textbf{Path length validation}: Does the Pokec mutual-friendship graph exhibit average path lengths consistent with the six degrees hypothesis (i.e., $\langle d \rangle \leq 6$)?
+\item \textbf{Reciprocity effects}: How does restricting to mutual friendships affect connectivity and path lengths compared to treating all directed edges as connections?
+\item \textbf{Small-world metrics}: Does the network exhibit the characteristic combination of high clustering and short paths?
+\item \textbf{Component structure}: What fraction of users are reachable from each other (i.e., lie in the largest connected component)?
+\end{enumerate}
+
+These questions guide our experimental design and interpretation of results in subsequent sections.
+
