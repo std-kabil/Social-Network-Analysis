@@ -1,6 +1,8 @@
 # Social Network Analysis: Six Degrees of Separation
 
-A comprehensive data mining project analyzing the **soc-Pokec** dataset to empirically test the "six degrees of separation" theory using graph mining techniques.
+A data mining project analyzing the **soc-Pokec** dataset to empirically test the "six degrees of separation" theory using graph mining techniques.
+
+Code repository (fill in): <YOUR_GITHUB_REPO_URL>
 
 ## Project Overview
 
@@ -11,6 +13,11 @@ This project implements social network analysis on the soc-Pokec dataset (Slovak
 - Perform community detection using Louvain algorithm
 - Identify influential hub nodes
 - Predict potential new connections via link prediction
+
+The implementation supports two graph interpretations:
+
+- **Mutual friendships**: keep only reciprocated edges (closer to real-world acquaintance chains)
+- **All connections**: treat every directed edge as an undirected connection
 
 ## Dataset
 
@@ -24,22 +31,28 @@ This project implements social network analysis on the soc-Pokec dataset (Slovak
 
 ```
 Social-Network-Analysis/
-├── main_analysis.ipynb    # Main Jupyter notebook with all analysis
-├── requirements.txt       # Python dependencies
-├── project-plan.md        # Detailed project plan
-├── README.md              # This file
-├── data/                  # Dataset files (downloaded automatically)
-│   ├── soc-pokec-relationships.txt
-│   ├── soc-pokec-profiles.txt
-│   └── soc-pokec-readme.txt
-└── outputs/               # Generated visualizations and results
-    ├── path_lengths_distribution.png
-    ├── degree_distribution.png
-    ├── community_size_distribution.png
-    ├── clustering_distribution.png
-    ├── network_summary.png
+├── app.py                 # Streamlit dashboard (main way to run analyses)
+├── main_analysis.ipynb     # Notebook (experiments / exploration)
+├── requirements.txt        # Python dependencies
+├── project-plan.md         # Detailed project plan
+├── requirements.md         # Report requirements (format / constraints)
+├── report_tex/             # IEEE LaTeX report (parts + build helpers)
+│   ├── report.tex
+│   ├── report_full.tex     # Generated (via concat_report.py)
+│   ├── concat_report.py
+│   └── parts/
+├── data/                   # Dataset files (downloaded/placed here)
+└── outputs/                # Generated results, figures, and ML artifacts
+    ├── analysis_results_mutual.json
+    ├── analysis_results_all.json
+    ├── network_summary_mutual.png
     ├── network_visualization.html
-    └── analysis_results.json
+    ├── soc-pokec network sample (1000 nodes).png
+    ├── soc-pokec network sample (1000 nodes) example path.png
+    └── ml-results/
+        ├── link_prediction_metrics_mutual.json
+        ├── link-prediction-ROC.png
+        └── link-prediction-precision-recall.png
 ```
 
 ## Installation
@@ -65,11 +78,32 @@ Social-Network-Analysis/
 
 ## Usage
 
-1. Open the Jupyter notebook:
+### Option A (recommended): Streamlit dashboard
 
-   ```bash
-   jupyter notebook main_analysis.ipynb
-   ```
+Run:
+
+```bash
+streamlit run app.py
+```
+
+The dashboard will:
+
+- Load the dataset and build the graph (mutual vs all)
+- Extract the largest connected component (LCC)
+- Estimate shortest-path distribution via sampling
+- Compute summary metrics (degree, density, clustering)
+- Run Louvain community detection on a BFS sample
+- Compute centrality rankings on a BFS sample
+- Run link prediction (ML) on the visualization subgraph
+- Export JSON/CSV/PNG artifacts into `outputs/`
+
+### Option B: Jupyter notebook
+
+Open:
+
+```bash
+jupyter notebook main_analysis.ipynb
+```
 
 2. Run cells sequentially. The notebook will:
    - Download the dataset automatically (~500MB compressed)
@@ -78,18 +112,19 @@ Social-Network-Analysis/
    - Perform community detection and centrality analysis
    - Generate visualizations
 
-**Note**: The full analysis requires at least 16GB RAM. Sampling is used for computationally intensive operations.
+**Note**: The full graph is large. Sampling is used for computationally intensive operations. A machine with **16GB RAM minimum** (32GB recommended) is strongly advised.
 
 ## Key Findings
 
-Expected results based on the analysis:
+Results depend on graph mode and sampling configuration. A typical mutual-mode run (exported in `outputs/analysis_results_mutual.json`) reports:
 
-| Metric                         | Value    |
-| ------------------------------ | -------- |
-| Average Degrees of Separation  | ~4-5     |
-| Network Density                | ~0.00002 |
-| Average Clustering Coefficient | ~0.1     |
-| Number of Communities          | ~100-500 |
+| Metric                        | Value   |
+| ----------------------------- | ------- |
+| Average Degrees of Separation | ~5.67   |
+| Median Degrees of Separation  | 6       |
+| Max Observed Distance         | 11      |
+| Avg. Clustering Coefficient   | ~0.105  |
+| Louvain Modularity (sample)   | ~0.7855 |
 
 The analysis confirms the "small-world" property of social networks, with most users connected within 6 degrees.
 
@@ -106,6 +141,27 @@ The analysis confirms the "small-world" property of social networks, with most u
 - Python 3.10+
 - 16GB+ RAM (32GB recommended)
 - ~2GB disk space for dataset
+
+## LaTeX Report
+
+The IEEE-style report lives in `report_tex/`.
+
+- **Main file**: `report_tex/report.tex`
+- **Parts**: `report_tex/parts/*.tex`
+- **Concatenated build**: `report_tex/report_full.tex` (generated by `report_tex/concat_report.py`)
+
+To generate the concatenated file:
+
+```bash
+python3 report_tex/concat_report.py
+```
+
+To compile (requires a TeX distribution providing `pdflatex`):
+
+```bash
+pdflatex report_tex/report.tex
+pdflatex report_tex/report.tex
+```
 
 ## License
 
