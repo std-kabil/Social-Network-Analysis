@@ -1,557 +1,583 @@
-"""
-Streamlit Dashboard for Social Network Analysis
-Six Degrees of Separation - soc-Pokec Dataset
-"""
+import gc
+import json
+import time
+from collections import Counter, deque
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-import streamlit as st
 import networkx as nx
-import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-import plotly.express as px
-from pathlib import Path
-import json
-import random
-from collections import Counter
-
-# Page configuration
-st.set_page_config(
-    page_title="Six Degrees of Separation",
-    page_icon="🌐",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# Custom CSS
-st.markdown("""
-<style>
-    .main-header {
-        font-size: 2.5rem;
-        font-weight: bold;
-        color: #1E88E5;
-        text-align: center;
-        margin-bottom: 1rem;
-    }
-    .metric-card {
-        background-color: #f0f2f6;
-        border-radius: 10px;
-        padding: 1rem;
-        text-align: center;
-    }
-    .stMetric {
-        background-color: #f8f9fa;
-        padding: 1rem;
-        border-radius: 8px;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# Constants
-DATA_DIR = Path('data')
-OUTPUTS_DIR = Path('outputs')
+import psutil
+import streamlit as st
 
 
-@st.cache_resource
-def load_graph():
-    """Load the network graph (cached for performance)."""
-    edges_file = DATA_DIR / 'soc-pokec-relationships.txt'
-    
-    if not edges_file.exists():
-        return None, None
-    
-    with st.spinner("Loading graph... This may take a few minutes."):
-        G = nx.read_edgelist(str(edges_file), create_using=nx.DiGraph(), nodetype=int)
-        G_undirected = G.to_undirected()
-    
-    return G, G_undirected
+DATA_DIR_DEFAULT = Path("data")
+OUTPUTS_DIR_DEFAULT = Path("outputs")
 
 
-@st.cache_data
-def load_results():
-    """Load pre-computed analysis results."""
-    results_file = OUTPUTS_DIR / 'analysis_results.json'
-    
-    if results_file.exists():
-        with open(results_file, 'r') as f:
-            return json.load(f)
-    return None
+def get_memory_usage_gb() -> float:
+    process = psutil.Process()
+    return process.memory_info().rss / (1024**3)
 
 
-@st.cache_data
-def get_largest_component_nodes(_G_undirected):
-    """Get nodes in the largest connected component."""
-    if _G_undirected is None:
-        return []
-    components = list(nx.connected_components(_G_undirected))
-    largest_cc = max(components, key=len)
-    return list(largest_cc)
+@dataclass(frozen=True)
+class AnalysisConfig:
+    graph_mode: str  # "mutual" | "all"
+    num_pairs: int
+    random_seed: int
+    clustering_sample: int
+    community_sample: int
+    centrality_sample: int
+    betweenness_k: int
 
 
-def compute_path(G_undirected, source, target):
-    """Compute shortest path between two nodes."""
+def ensure_file_exists(path: Path, label: str) -> None:
+    if not path.exists():
+        raise FileNotFoundError(f"Missing {label}: {path}")
+
+
+def read_results_json(path: Path) -> Optional[Dict[str, Any]]:
+    if not path.exists():
+        return None
     try:
-        path = nx.shortest_path(G_undirected, source, target)
-        return path
-    except nx.NetworkXNoPath:
-        return None
-    except nx.NodeNotFound:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
         return None
 
 
-def create_path_visualization(G_undirected, path):
-    """Create a visualization of the path between nodes."""
-    if path is None or len(path) < 2:
-        return None
-    
-    # Create subgraph with path nodes and their neighbors
-    path_set = set(path)
-    neighbor_nodes = set()
-    for node in path:
-        neighbors = list(G_undirected.neighbors(node))[:5]  # Limit neighbors
-        neighbor_nodes.update(neighbors)
-    
-    all_nodes = path_set | neighbor_nodes
-    subgraph = G_undirected.subgraph(all_nodes).copy()
-    
-    # Compute layout
-    pos = nx.spring_layout(subgraph, k=2, iterations=50, seed=42)
-    
-    # Create edge traces
-    edge_x, edge_y = [], []
-    path_edge_x, path_edge_y = [], []
-    
-    for edge in subgraph.edges():
-        x0, y0 = pos[edge[0]]
-        x1, y1 = pos[edge[1]]
-        
-        # Check if edge is on the path
-        is_path_edge = (edge[0] in path_set and edge[1] in path_set and
-                       abs(path.index(edge[0]) - path.index(edge[1])) == 1)
-        
-        if is_path_edge:
-            path_edge_x.extend([x0, x1, None])
-            path_edge_y.extend([y0, y1, None])
-        else:
-            edge_x.extend([x0, x1, None])
-            edge_y.extend([y0, y1, None])
-    
-    # Regular edges
-    edge_trace = go.Scatter(
-        x=edge_x, y=edge_y,
-        line=dict(width=0.5, color='#ccc'),
-        hoverinfo='none',
-        mode='lines'
-    )
-    
-    # Path edges (highlighted)
-    path_edge_trace = go.Scatter(
-        x=path_edge_x, y=path_edge_y,
-        line=dict(width=3, color='#E53935'),
-        hoverinfo='none',
-        mode='lines',
-        name='Path'
-    )
-    
-    # Node traces
-    node_x = [pos[node][0] for node in subgraph.nodes()]
-    node_y = [pos[node][1] for node in subgraph.nodes()]
-    node_colors = ['#E53935' if node in path_set else '#90CAF9' for node in subgraph.nodes()]
-    node_sizes = [20 if node in path_set else 10 for node in subgraph.nodes()]
-    node_text = [f"Node {node}" + (" (on path)" if node in path_set else "") for node in subgraph.nodes()]
-    
-    node_trace = go.Scatter(
-        x=node_x, y=node_y,
-        mode='markers+text',
-        hoverinfo='text',
-        text=[str(n) if n in path_set else '' for n in subgraph.nodes()],
-        textposition='top center',
-        hovertext=node_text,
-        marker=dict(
-            color=node_colors,
-            size=node_sizes,
-            line=dict(width=1, color='white')
-        )
-    )
-    
-    fig = go.Figure(
-        data=[edge_trace, path_edge_trace, node_trace],
-        layout=go.Layout(
-            title=f'Path Visualization: {len(path)-1} degrees of separation',
-            showlegend=False,
-            hovermode='closest',
-            margin=dict(b=20, l=5, r=5, t=40),
-            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-            plot_bgcolor='white',
-            height=500
-        )
-    )
-    
+def load_graph_all_connections(edges_file: Path) -> nx.Graph:
+    # Treat each line (u v) as an undirected edge.
+    # This avoids storing a full directed graph in memory.
+    return nx.read_edgelist(str(edges_file), create_using=nx.Graph(), nodetype=int)
+
+
+def load_graph_directed(edges_file: Path) -> nx.DiGraph:
+    return nx.read_edgelist(str(edges_file), create_using=nx.DiGraph(), nodetype=int)
+
+
+def build_mutual_graph(G_directed: nx.DiGraph, progress_cb=None) -> nx.Graph:
+    # Memory-friendly mutual edge extraction:
+    # iterate edges and check reverse existence; no `set(G.edges())`.
+    G_mutual = nx.Graph()
+    G_mutual.add_nodes_from(G_directed.nodes())
+
+    total_edges = G_directed.number_of_edges()
+    last_update = 0
+
+    for idx, (u, v) in enumerate(G_directed.edges()):
+        if u < v and G_directed.has_edge(v, u):
+            G_mutual.add_edge(u, v)
+
+        if progress_cb is not None:
+            # Update at most ~200 times
+            if total_edges > 0:
+                step = max(1, total_edges // 200)
+                if idx - last_update >= step:
+                    last_update = idx
+                    progress_cb(min(0.999, idx / total_edges))
+
+    if progress_cb is not None:
+        progress_cb(1.0)
+
+    return G_mutual
+
+
+def connected_components_summary(G: nx.Graph) -> Tuple[int, List[int], List[int]]:
+    # Returns (num_components, largest_component_nodes, sizes_top5)
+    num = 0
+    largest: List[int] = []
+    top_sizes: List[int] = []
+
+    for comp in nx.connected_components(G):
+        num += 1
+        comp_size = len(comp)
+        if comp_size > len(largest):
+            largest = list(comp)
+
+        top_sizes.append(comp_size)
+        if len(top_sizes) > 50:
+            top_sizes.sort(reverse=True)
+            top_sizes = top_sizes[:5]
+
+    top_sizes.sort(reverse=True)
+    top5 = top_sizes[:5]
+    return num, largest, top5
+
+
+def lcc_subgraph(G: nx.Graph) -> Tuple[nx.Graph, Dict[str, Any]]:
+    t0 = time.time()
+    num_components, largest_nodes, top5 = connected_components_summary(G)
+    G_lcc = G.subgraph(largest_nodes).copy()
+    elapsed = time.time() - t0
+
+    info = {
+        "num_components": num_components,
+        "largest_component_nodes": len(largest_nodes),
+        "largest_component_pct": 100.0 * len(largest_nodes) / max(1, G.number_of_nodes()),
+        "top_component_sizes": top5,
+        "elapsed_seconds": elapsed,
+    }
+    return G_lcc, info
+
+
+def sample_shortest_paths(
+    G: nx.Graph,
+    num_pairs: int,
+    seed: int,
+    progress_cb=None,
+) -> Dict[str, Any]:
+    rng = np.random.default_rng(seed)
+
+    # Numpy array is much smaller than list[int]
+    nodes = np.fromiter(G.nodes(), dtype=np.int64, count=G.number_of_nodes())
+    if nodes.size == 0:
+        return {
+            "samples": 0,
+            "found": 0,
+            "failed": 0,
+            "lengths": [],
+        }
+
+    lengths: List[int] = []
+    failed = 0
+
+    # Stream pairs in chunks to avoid huge intermediate arrays
+    chunk = 500
+    done = 0
+
+    while done < num_pairs:
+        take = min(chunk, num_pairs - done)
+        src = rng.choice(nodes, size=take, replace=True)
+        tgt = rng.choice(nodes, size=take, replace=True)
+
+        for u, v in zip(src.tolist(), tgt.tolist()):
+            if u == v:
+                continue
+            try:
+                lengths.append(nx.shortest_path_length(G, u, v))
+            except nx.NetworkXNoPath:
+                failed += 1
+
+        done += take
+        if progress_cb is not None:
+            progress_cb(done / num_pairs)
+
+    if progress_cb is not None:
+        progress_cb(1.0)
+
+    if lengths:
+        arr = np.asarray(lengths, dtype=np.int32)
+        stats = {
+            "samples": num_pairs,
+            "found": int(arr.size),
+            "failed": int(failed),
+            "average": float(arr.mean()),
+            "median": float(np.median(arr)),
+            "std": float(arr.std()),
+            "min": int(arr.min()),
+            "max": int(arr.max()),
+        }
+    else:
+        stats = {
+            "samples": num_pairs,
+            "found": 0,
+            "failed": int(failed),
+            "average": None,
+            "median": None,
+            "std": None,
+            "min": None,
+            "max": None,
+        }
+
+    return {"stats": stats, "lengths": lengths}
+
+
+def compute_basic_metrics(G: nx.Graph, clustering_sample: int, seed: int) -> Dict[str, Any]:
+    n = G.number_of_nodes()
+    m = G.number_of_edges()
+
+    # Degrees as numpy array to reduce overhead
+    degrees = np.fromiter((d for _, d in G.degree()), dtype=np.int32, count=n)
+    avg_degree = float(degrees.mean()) if n else 0.0
+    density = float(nx.density(G)) if n else 0.0
+
+    rng = np.random.default_rng(seed)
+    if n > 0:
+        sample_size = int(min(clustering_sample, n))
+        # Sample nodes without building a full python list
+        nodes = np.fromiter(G.nodes(), dtype=np.int64, count=n)
+        sample_nodes = rng.choice(nodes, size=sample_size, replace=False).tolist()
+        clustering = nx.clustering(G, nodes=sample_nodes)
+        avg_clustering = float(np.mean(list(clustering.values()))) if clustering else 0.0
+    else:
+        avg_clustering = 0.0
+
+    return {
+        "nodes": int(n),
+        "edges": int(m),
+        "average_degree": avg_degree,
+        "density": density,
+        "average_clustering_sampled": avg_clustering,
+        "degree_summary": {
+            "min": int(degrees.min()) if n else 0,
+            "max": int(degrees.max()) if n else 0,
+            "median": float(np.median(degrees)) if n else 0.0,
+        },
+        "degrees_for_plot": degrees,
+    }
+
+
+def bfs_sample_nodes(G: nx.Graph, start_node: int, max_nodes: int) -> List[int]:
+    visited = set([start_node])
+    q = deque([start_node])
+
+    while q and len(visited) < max_nodes:
+        u = q.popleft()
+        for v in G.neighbors(u):
+            if v not in visited:
+                visited.add(v)
+                q.append(v)
+                if len(visited) >= max_nodes:
+                    break
+
+    return list(visited)
+
+
+def community_detection_louvain(G: nx.Graph, sample_size: int, seed: int) -> Dict[str, Any]:
+    import community as community_louvain
+
+    if G.number_of_nodes() == 0:
+        return {"num_communities": 0, "modularity": None, "top_communities": []}
+
+    degrees_dict = dict(G.degree())
+    start_node = max(degrees_dict, key=degrees_dict.get)
+
+    sample_nodes = bfs_sample_nodes(G, start_node, min(sample_size, G.number_of_nodes()))
+    G_sample = G.subgraph(sample_nodes).copy()
+
+    partition = community_louvain.best_partition(G_sample, random_state=seed)
+    modularity = community_louvain.modularity(partition, G_sample)
+
+    sizes = Counter(partition.values())
+    top = [(int(cid), int(sz)) for cid, sz in sizes.most_common(10)]
+
+    return {
+        "sample_nodes": int(G_sample.number_of_nodes()),
+        "sample_edges": int(G_sample.number_of_edges()),
+        "num_communities": int(len(sizes)),
+        "modularity": float(modularity),
+        "top_communities": top,
+    }
+
+
+def centrality_analysis(G: nx.Graph, sample_size: int, betweenness_k: int, seed: int) -> Dict[str, Any]:
+    if G.number_of_nodes() == 0:
+        return {"degree": [], "betweenness": []}
+
+    degrees_dict = dict(G.degree())
+    start_node = max(degrees_dict, key=degrees_dict.get)
+
+    sample_nodes = bfs_sample_nodes(G, start_node, min(sample_size, G.number_of_nodes()))
+    Gc = G.subgraph(sample_nodes).copy()
+
+    degree_centrality = nx.degree_centrality(Gc)
+    top_degree = sorted(degree_centrality.items(), key=lambda x: x[1], reverse=True)[:10]
+
+    bw_k = min(betweenness_k, Gc.number_of_nodes())
+    betweenness = nx.betweenness_centrality(Gc, k=bw_k, seed=seed)
+    top_bw = sorted(betweenness.items(), key=lambda x: x[1], reverse=True)[:10]
+
+    return {
+        "sample_nodes": int(Gc.number_of_nodes()),
+        "sample_edges": int(Gc.number_of_edges()),
+        "degree": [(int(n), float(v), int(Gc.degree(n))) for n, v in top_degree],
+        "betweenness": [(int(n), float(v)) for n, v in top_bw],
+    }
+
+
+def plot_degree_hist(degrees: np.ndarray, color: str, title: str) -> go.Figure:
+    if degrees.size == 0:
+        fig = go.Figure()
+        fig.update_layout(title=title)
+        return fig
+
+    # Plot only a sample for responsiveness
+    sample_n = int(min(200_000, degrees.size))
+    rng = np.random.default_rng(42)
+    idx = rng.choice(degrees.size, size=sample_n, replace=False)
+    deg_s = degrees[idx]
+
+    fig = go.Figure(data=[go.Histogram(x=deg_s, nbinsx=120, marker_color=color, opacity=0.8)])
+    fig.update_layout(title=title, xaxis_title="Degree", yaxis_title="Count")
     return fig
 
 
-def main():
-    # Header
-    st.markdown('<h1 class="main-header">🌐 Six Degrees of Separation</h1>', unsafe_allow_html=True)
-    st.markdown('<p style="text-align: center; color: #666;">Social Network Analysis on soc-Pokec Dataset</p>', unsafe_allow_html=True)
-    
-    # Sidebar
-    st.sidebar.title("Navigation")
-    page = st.sidebar.radio(
-        "Select Page",
-        ["📊 Dashboard", "🔍 Path Finder", "📈 Network Metrics", "👥 Communities", "ℹ️ About"]
-    )
-    
-    # Load data
-    G, G_undirected = load_graph()
-    results = load_results()
-    
-    if G is None:
-        st.warning("⚠️ Dataset not found. Please run the Jupyter notebook first to download and process the data.")
-        st.info("Run `main_analysis.ipynb` to download the soc-Pokec dataset and generate analysis results.")
-        
-        # Show demo mode
-        st.markdown("---")
-        st.subheader("Demo Mode")
-        st.write("Showing sample statistics based on expected results:")
-        
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Nodes", "1.6M")
-        col2.metric("Edges", "30M")
-        col3.metric("Avg. Separation", "~4.5")
-        col4.metric("Communities", "~200")
-        return
-    
-    # Page routing
-    if page == "📊 Dashboard":
-        show_dashboard(G, G_undirected, results)
-    elif page == "🔍 Path Finder":
-        show_path_finder(G, G_undirected)
-    elif page == "📈 Network Metrics":
-        show_network_metrics(G, G_undirected, results)
-    elif page == "👥 Communities":
-        show_communities(G_undirected, results)
-    elif page == "ℹ️ About":
-        show_about()
+def plot_path_length_hist(lengths: List[int], color: str, title: str) -> go.Figure:
+    fig = go.Figure()
+    if lengths:
+        fig.add_trace(go.Histogram(x=lengths, nbinsx=20, marker_color=color, opacity=0.8))
+    fig.update_layout(title=title, xaxis_title="Shortest path length", yaxis_title="Count")
+    return fig
 
 
-def show_dashboard(G, G_undirected, results):
-    """Main dashboard view."""
-    st.header("📊 Network Overview")
-    
-    # Key metrics
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("Total Nodes", f"{G.number_of_nodes():,}")
-    with col2:
-        st.metric("Total Edges", f"{G.number_of_edges():,}")
-    with col3:
-        if results:
-            avg_sep = results['degrees_of_separation']['average']
-            st.metric("Avg. Separation", f"{avg_sep:.2f}")
-        else:
-            st.metric("Avg. Separation", "Run analysis")
-    with col4:
-        if results:
-            num_comm = results['community_detection']['num_communities']
-            st.metric("Communities", f"{num_comm}")
-        else:
-            st.metric("Communities", "Run analysis")
-    
-    st.markdown("---")
-    
-    # Visualizations
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("Path Length Distribution")
-        if results:
-            # Create distribution from results
-            avg = results['degrees_of_separation']['average']
-            std = results['degrees_of_separation']['std']
-            
-            # Simulate distribution
-            np.random.seed(42)
-            simulated = np.random.normal(avg, std, 10000)
-            simulated = np.clip(simulated, 1, 12).astype(int)
-            
-            fig = px.histogram(
-                x=simulated,
-                nbins=12,
-                labels={'x': 'Degrees of Separation', 'y': 'Frequency'},
-                color_discrete_sequence=['#1E88E5']
-            )
-            fig.add_vline(x=avg, line_dash="dash", line_color="red", 
-                         annotation_text=f"Mean: {avg:.2f}")
-            fig.add_vline(x=6, line_dash="dot", line_color="green",
-                         annotation_text="Six Degrees")
-            fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("Run the analysis notebook to see the distribution.")
-    
-    with col2:
-        st.subheader("Degree Distribution (Log-Log)")
-        # Sample degree distribution
-        sample_nodes = random.sample(list(G_undirected.nodes()), min(50000, G_undirected.number_of_nodes()))
-        degrees = [G_undirected.degree(n) for n in sample_nodes]
-        degree_counts = Counter(degrees)
-        
-        fig = px.scatter(
-            x=list(degree_counts.keys()),
-            y=list(degree_counts.values()),
-            log_x=True,
-            log_y=True,
-            labels={'x': 'Degree', 'y': 'Frequency'},
-            color_discrete_sequence=['#43A047']
+def save_results(path: Path, payload: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def clear_memory() -> None:
+    gc.collect()
+
+
+def main() -> None:
+    st.set_page_config(page_title="Social Network Analysis (Pokec)", layout="wide")
+
+    st.title("Social Network Analysis (soc-Pokec)")
+
+    with st.sidebar:
+        st.header("Configuration")
+
+        graph_mode_label = st.selectbox(
+            "Graph mode",
+            options=["Mutual friendships only", "All connections"],
+            index=0,
         )
-        fig.update_traces(marker=dict(size=5, opacity=0.6))
-        fig.update_layout(height=400)
-        st.plotly_chart(fig, use_container_width=True)
-    
-    # Summary table
-    st.subheader("Network Summary")
-    if results:
-        summary_df = pd.DataFrame({
-            'Metric': [
-                'Total Nodes', 'Total Edges (Directed)', 'Avg. Degrees of Separation',
-                'Average Degree', 'Network Density', 'Clustering Coefficient',
-                'Reciprocity', 'Modularity'
-            ],
-            'Value': [
-                f"{results['dataset']['nodes']:,}",
-                f"{results['dataset']['edges_directed']:,}",
-                f"{results['degrees_of_separation']['average']:.2f}",
-                f"{results['network_metrics']['average_degree']:.2f}",
-                f"{results['network_metrics']['density']:.6f}",
-                f"{results['network_metrics']['average_clustering']:.4f}",
-                f"{results['network_metrics']['reciprocity']:.4f}",
-                f"{results['community_detection']['modularity']:.4f}"
-            ]
-        })
-        st.dataframe(summary_df, use_container_width=True, hide_index=True)
+        graph_mode = "mutual" if graph_mode_label.startswith("Mutual") else "all"
 
+        data_dir = Path(st.text_input("Data directory", value=str(DATA_DIR_DEFAULT)))
+        outputs_dir = Path(st.text_input("Outputs directory", value=str(OUTPUTS_DIR_DEFAULT)))
 
-def show_path_finder(G, G_undirected):
-    """Interactive path finder between two nodes."""
-    st.header("🔍 Path Finder")
-    st.write("Find the shortest path (degrees of separation) between any two users.")
-    
-    # Get sample nodes for suggestions
-    lcc_nodes = get_largest_component_nodes(G_undirected)
-    
-    if not lcc_nodes:
-        st.error("Could not load graph data.")
-        return
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        source = st.number_input(
-            "Source Node ID",
-            min_value=1,
-            max_value=max(lcc_nodes),
-            value=random.choice(lcc_nodes[:1000]),
-            help="Enter a user ID"
+        edges_file = data_dir / "soc-pokec-relationships.txt"
+        st.caption(f"Edges file: `{edges_file}`")
+
+        num_pairs = st.number_input("Shortest-path samples (pairs)", min_value=100, max_value=100_000, value=10_000, step=100)
+        clustering_sample = st.number_input("Clustering sample (nodes)", min_value=100, max_value=200_000, value=10_000, step=100)
+        community_sample = st.number_input("Community detection sample (nodes)", min_value=1_000, max_value=200_000, value=50_000, step=1_000)
+        centrality_sample = st.number_input("Centrality sample (nodes)", min_value=1_000, max_value=200_000, value=10_000, step=1_000)
+        betweenness_k = st.number_input("Betweenness k (sampled)", min_value=50, max_value=5_000, value=500, step=50)
+        random_seed = st.number_input("Random seed", min_value=0, max_value=1_000_000, value=42, step=1)
+
+        cfg = AnalysisConfig(
+            graph_mode=graph_mode,
+            num_pairs=int(num_pairs),
+            random_seed=int(random_seed),
+            clustering_sample=int(clustering_sample),
+            community_sample=int(community_sample),
+            centrality_sample=int(centrality_sample),
+            betweenness_k=int(betweenness_k),
         )
-    
-    with col2:
-        target = st.number_input(
-            "Target Node ID",
-            min_value=1,
-            max_value=max(lcc_nodes),
-            value=random.choice(lcc_nodes[:1000]),
-            help="Enter a user ID"
+
+        run_btn = st.button("Run analysis", type="primary")
+        save_btn = st.button("Save results to outputs/")
+        clear_btn = st.button("Clear session results")
+        clear_cache_btn = st.button("Clear Streamlit cache")
+
+        st.divider()
+        st.metric("RAM used (GB)", f"{get_memory_usage_gb():.2f}")
+
+    if clear_cache_btn:
+        st.cache_data.clear()
+        st.cache_resource.clear()
+        clear_memory()
+        st.success("Cleared Streamlit cache.")
+
+    if clear_btn:
+        st.session_state.pop("analysis", None)
+        clear_memory()
+        st.success("Cleared session results.")
+
+    tabs = st.tabs(["Overview", "Run / Results", "Outputs"])
+
+    with tabs[0]:
+        st.subheader("Overview")
+        st.write(
+            "This app runs a sampled analysis of the **soc-Pokec** social network. "
+            "To avoid memory issues, it loads and analyzes **only the selected graph mode** at a time."
         )
-    
-    col1, col2, col3 = st.columns([1, 1, 2])
-    
-    with col1:
-        if st.button("🔍 Find Path", type="primary"):
-            with st.spinner("Computing shortest path..."):
-                path = compute_path(G_undirected, source, target)
-                
-                if path:
-                    st.success(f"✅ Found path with **{len(path)-1} degrees** of separation!")
-                    st.write(f"**Path**: {' → '.join(map(str, path))}")
-                    
-                    # Visualize
-                    fig = create_path_visualization(G_undirected, path)
-                    if fig:
-                        st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.error("❌ No path found between these nodes.")
-    
-    with col2:
-        if st.button("🎲 Random Pair"):
-            st.rerun()
-    
-    # Statistics
-    st.markdown("---")
-    st.subheader("Quick Stats")
-    
-    if source in G_undirected:
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric(f"Node {source} Degree", G_undirected.degree(source))
-        with col2:
-            if target in G_undirected:
-                st.metric(f"Node {target} Degree", G_undirected.degree(target))
 
+        legacy = read_results_json(outputs_dir / "analysis_results.json")
+        if legacy is not None:
+            st.caption("Found existing `outputs/analysis_results.json` (previous run).")
+            st.json(legacy)
+        else:
+            st.caption("No precomputed `outputs/analysis_results.json` found.")
 
-def show_network_metrics(G, G_undirected, results):
-    """Display detailed network metrics."""
-    st.header("📈 Network Metrics")
-    
-    if results:
-        # Degrees of Separation
-        st.subheader("Degrees of Separation Statistics")
-        col1, col2, col3, col4, col5 = st.columns(5)
-        
-        dos = results['degrees_of_separation']
-        col1.metric("Average", f"{dos['average']:.2f}")
-        col2.metric("Median", f"{dos['median']:.2f}")
-        col3.metric("Std Dev", f"{dos['std']:.2f}")
-        col4.metric("Min", dos['min'])
-        col5.metric("Max", dos['max'])
-        
-        st.markdown("---")
-        
-        # Network Properties
-        st.subheader("Network Properties")
-        col1, col2, col3, col4 = st.columns(4)
-        
-        nm = results['network_metrics']
-        col1.metric("Average Degree", f"{nm['average_degree']:.2f}")
-        col2.metric("Density", f"{nm['density']:.6f}")
-        col3.metric("Clustering Coeff.", f"{nm['average_clustering']:.4f}")
-        col4.metric("Reciprocity", f"{nm['reciprocity']:.4f}")
-        
-        st.markdown("---")
-        
-        # Top Nodes
-        st.subheader("Top Influential Nodes")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.write("**By PageRank**")
-            pr_df = pd.DataFrame(results['top_nodes']['by_pagerank'], columns=['Node ID', 'PageRank'])
-            st.dataframe(pr_df, use_container_width=True, hide_index=True)
-        
-        with col2:
-            st.write("**By Degree Centrality**")
-            dc_df = pd.DataFrame(results['top_nodes']['by_degree'], columns=['Node ID', 'Centrality'])
-            st.dataframe(dc_df, use_container_width=True, hide_index=True)
-    else:
-        st.info("Run the analysis notebook to compute detailed metrics.")
-        
-        # Show basic stats from graph
-        st.subheader("Basic Statistics (Live)")
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Nodes", f"{G.number_of_nodes():,}")
-        col2.metric("Edges (Directed)", f"{G.number_of_edges():,}")
-        col3.metric("Edges (Undirected)", f"{G_undirected.number_of_edges():,}")
+        st.write("Existing output artifacts:")
+        if outputs_dir.exists():
+            for p in sorted(outputs_dir.glob("*")):
+                if p.is_file() and p.name != ".gitkeep":
+                    st.write(f"- `{p.name}`")
+        else:
+            st.write(f"`{outputs_dir}` does not exist yet.")
 
+    with tabs[1]:
+        st.subheader("Run / Results")
 
-def show_communities(G_undirected, results):
-    """Display community detection results."""
-    st.header("👥 Community Structure")
-    
-    if results:
-        cd = results['community_detection']
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Number of Communities", cd['num_communities'])
-        with col2:
-            st.metric("Modularity Score", f"{cd['modularity']:.4f}")
-        
-        st.markdown("---")
-        
-        st.subheader("What is Modularity?")
-        st.write("""
-        **Modularity** measures the strength of division of a network into communities.
-        - Values range from -0.5 to 1
-        - Higher values indicate stronger community structure
-        - Values > 0.3 typically indicate significant community structure
-        """)
-        
-        # Modularity gauge
-        fig = go.Figure(go.Indicator(
-            mode="gauge+number",
-            value=cd['modularity'],
-            domain={'x': [0, 1], 'y': [0, 1]},
-            gauge={
-                'axis': {'range': [0, 1]},
-                'bar': {'color': "#1E88E5"},
-                'steps': [
-                    {'range': [0, 0.3], 'color': "#ffcdd2"},
-                    {'range': [0.3, 0.5], 'color': "#fff9c4"},
-                    {'range': [0.5, 1], 'color': "#c8e6c9"}
-                ],
-                'threshold': {
-                    'line': {'color': "red", 'width': 4},
-                    'thickness': 0.75,
-                    'value': 0.3
-                }
-            },
-            title={'text': "Modularity Score"}
-        ))
-        fig.update_layout(height=300)
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("Run the analysis notebook to see community detection results.")
+        if run_btn:
+            try:
+                ensure_file_exists(edges_file, "edge list")
+            except FileNotFoundError as e:
+                st.error(str(e))
+                st.stop()
 
+            status = st.status("Running analysis...", expanded=True)
+            status.write(f"Config: `{cfg}`")
+            status.write(f"Initial RAM: {get_memory_usage_gb():.2f} GB")
 
-def show_about():
-    """About page with project information."""
-    st.header("ℹ️ About This Project")
-    
-    st.markdown("""
-    ## Six Degrees of Separation
-    
-    This project empirically tests the famous "six degrees of separation" theory using 
-    the **soc-Pokec** social network dataset from Stanford SNAP.
-    
-    ### The Theory
-    The six degrees of separation is the idea that all people are six or fewer social 
-    connections away from each other. This concept suggests that a chain of "friend of 
-    a friend" statements can connect any two people in a maximum of six steps.
-    
-    ### Dataset
-    - **Source**: [Stanford SNAP](https://snap.stanford.edu/data/soc-Pokec.html)
-    - **Network**: Pokec (Slovak social network, similar to Facebook)
-    - **Nodes**: ~1.6 million users
-    - **Edges**: ~30 million friendships
-    
-    ### Techniques Used
-    - **Graph Analysis**: NetworkX
-    - **Community Detection**: Louvain Algorithm
-    - **Centrality Measures**: PageRank, Betweenness, Degree
-    - **Link Prediction**: Jaccard, Adamic-Adar
-    
-    ### Key Findings
-    Our analysis confirms the small-world property of social networks, with an average 
-    degrees of separation of approximately **4-5**, well below the theoretical 6.
-    
-    ---
-    
-    *Developed as part of a Data Mining course project.*
-    """)
-    
-    st.markdown("---")
-    
-    st.subheader("Project Structure")
-    st.code("""
-Social-Network-Analysis/
-├── main_analysis.ipynb    # Main analysis notebook
-├── app.py                 # This Streamlit dashboard
-├── requirements.txt       # Dependencies
-├── data/                  # Dataset files
-└── outputs/               # Generated results
-    """)
+            t0 = time.time()
+
+            progress = st.progress(0.0)
+
+            reciprocity_val: Optional[float] = None
+            if cfg.graph_mode == "all":
+                status.write("Loading FULL undirected graph (all connections)...")
+                G = load_graph_all_connections(edges_file)
+                progress.progress(0.15)
+            else:
+                status.write("Loading directed graph (for reciprocity + mutual edge extraction)...")
+                Gd = load_graph_directed(edges_file)
+                reciprocity_val = float(nx.reciprocity(Gd))
+                status.write(f"Reciprocity: {reciprocity_val:.4f}")
+
+                status.write("Building mutual (reciprocal) undirected graph...")
+
+                def mutual_progress(x: float) -> None:
+                    progress.progress(0.15 + 0.35 * x)
+
+                G = build_mutual_graph(Gd, progress_cb=mutual_progress)
+                del Gd
+                clear_memory()
+
+            status.write(f"Graph loaded/built. RAM: {get_memory_usage_gb():.2f} GB")
+
+            status.write("Extracting largest connected component (LCC)...")
+            G_lcc, cc_info = lcc_subgraph(G)
+            del G
+            clear_memory()
+            progress.progress(0.55)
+
+            status.write(f"LCC nodes: {G_lcc.number_of_nodes():,}, edges: {G_lcc.number_of_edges():,}")
+            status.write(f"Connected components: {cc_info['num_components']:,}")
+            status.write(f"RAM after LCC: {get_memory_usage_gb():.2f} GB")
+
+            status.write("Sampling shortest paths...")
+
+            def sp_progress(x: float) -> None:
+                progress.progress(0.55 + 0.20 * x)
+
+            sp = sample_shortest_paths(G_lcc, cfg.num_pairs, cfg.random_seed, progress_cb=sp_progress)
+
+            status.write("Computing network metrics...")
+            metrics = compute_basic_metrics(G_lcc, cfg.clustering_sample, cfg.random_seed)
+            progress.progress(0.80)
+
+            status.write("Community detection (Louvain) on BFS sample...")
+            comm = community_detection_louvain(G_lcc, cfg.community_sample, cfg.random_seed)
+            progress.progress(0.90)
+
+            status.write("Centrality analysis on BFS sample...")
+            cent = centrality_analysis(G_lcc, cfg.centrality_sample, cfg.betweenness_k, cfg.random_seed)
+            progress.progress(0.97)
+
+            # Keep only compact results in session state
+            elapsed = time.time() - t0
+            analysis = {
+                "config": asdict(cfg),
+                "graph": {
+                    "mode": cfg.graph_mode,
+                    "reciprocity": reciprocity_val,
+                    "lcc": {
+                        "nodes": int(G_lcc.number_of_nodes()),
+                        "edges": int(G_lcc.number_of_edges()),
+                        **cc_info,
+                    },
+                },
+                "degrees_of_separation": sp["stats"],
+                "network_metrics": {
+                    "nodes": metrics["nodes"],
+                    "edges": metrics["edges"],
+                    "average_degree": metrics["average_degree"],
+                    "density": metrics["density"],
+                    "average_clustering_sampled": metrics["average_clustering_sampled"],
+                    **metrics["degree_summary"],
+                },
+                "community_detection": comm,
+                "centrality": cent,
+                "runtime_seconds": float(elapsed),
+                "ram_gb_end": float(get_memory_usage_gb()),
+            }
+
+            st.session_state["analysis"] = {
+                "analysis": analysis,
+                "degrees": metrics["degrees_for_plot"],
+                "path_lengths": sp.get("lengths", []),
+            }
+
+            progress.progress(1.0)
+            status.update(label="Analysis completed", state="complete", expanded=False)
+
+            # Free the big LCC graph now that we have degrees + path lengths
+            del G_lcc
+            clear_memory()
+
+        sess = st.session_state.get("analysis")
+        if sess is None:
+            st.info("Click **Run analysis** in the sidebar to compute results.")
+        else:
+            analysis = sess["analysis"]
+            degrees = sess["degrees"]
+            path_lengths = sess["path_lengths"]
+
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Graph mode", analysis["graph"]["mode"])
+            c2.metric("LCC nodes", f"{analysis['graph']['lcc']['nodes']:,}")
+            c3.metric("LCC edges", f"{analysis['graph']['lcc']['edges']:,}")
+            c4.metric("Runtime (s)", f"{analysis['runtime_seconds']:.1f}")
+
+            st.subheader("Key metrics")
+            st.json(analysis)
+
+            st.subheader("Plots")
+            if analysis["graph"]["mode"] == "mutual":
+                color = "steelblue"
+            else:
+                color = "coral"
+
+            st.plotly_chart(plot_degree_hist(degrees, color=color, title="Degree distribution (sampled for plotting)"), use_container_width=True)
+            st.plotly_chart(plot_path_length_hist(path_lengths, color=color, title="Shortest path length distribution (sampled pairs)"), use_container_width=True)
+
+            st.caption(f"RAM used now: {get_memory_usage_gb():.2f} GB")
+
+        if save_btn:
+            sess = st.session_state.get("analysis")
+            if sess is None:
+                st.warning("Nothing to save yet. Run the analysis first.")
+            else:
+                payload = sess["analysis"]
+                out_path = outputs_dir / f"analysis_results_{payload['graph']['mode']}.json"
+                save_results(out_path, payload)
+                st.success(f"Saved: {out_path}")
+
+    with tabs[2]:
+        st.subheader("Outputs")
+        if not outputs_dir.exists():
+            st.info(f"No outputs directory found at `{outputs_dir}`")
+        else:
+            images = sorted(outputs_dir.glob("*.png"))
+            if images:
+                cols = st.columns(2)
+                for idx, img in enumerate(images):
+                    with cols[idx % 2]:
+                        st.image(str(img), caption=img.name, use_container_width=True)
+            else:
+                st.caption("No .png outputs found.")
+
+            html = outputs_dir / "network_visualization.html"
+            if html.exists():
+                st.caption("`network_visualization.html` exists. Streamlit can’t inline-render it safely by default.")
+                st.download_button("Download network_visualization.html", data=html.read_bytes(), file_name=html.name)
 
 
 if __name__ == "__main__":
