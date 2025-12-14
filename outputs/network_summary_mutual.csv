@@ -1,0 +1,14 @@
+Metric,Value
+Total Nodes (Directed loaded),"1,632,803"
+Total Edges (Directed loaded),"30,622,564"
+Total Edges (Undirected derived),"22,301,964"
+Total Edges (Mutual),"8,320,600"
+Largest Component Size (nodes),"1,198,274"
+Largest Component Edges,"8,312,834"
+Average Degree,13.87
+Network Density,0.000012
+Average Clustering Coeff. (sampled),0.1050
+Reciprocity (Directed),0.5434
+Avg. Degrees of Separation,5.67
+Number of Communities (sampled),37
+Modularity (sampled),0.7855
