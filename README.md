@@ -2,8 +2,6 @@
 
 A data mining project analyzing the **soc-Pokec** dataset to empirically test the "six degrees of separation" theory using graph mining techniques.
 
-Code repository (fill in): <YOUR_GITHUB_REPO_URL>
-
 ## Project Overview
 
 This project implements social network analysis on the soc-Pokec dataset (Slovak social network with 1.6M users and 30M relationships) to:
